@@ -1,0 +1,109 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+model User {
+  id String @id @default(uuid())
+  username String @unique
+  password_hash String
+  display_name String
+  role Role
+  active Boolean @default(true)
+  sessions Sessions[]
+  issued_tokens Tokens[] @relation("IssuedTokens")
+  cancelled_tokens Tokens[] @relation("CancelledTokens")
+  Audit Audit_Log[]
+}
+
+enum Role {
+  ADMIN
+  PACKAGER
+  GREETER
+  CASHIER
+  RUNNER
+}
+
+model Sessions {
+  token String @id @default(uuid())
+  userId String 
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  created_at  DateTime @default(now())
+  expires_at  DateTime 
+}
+
+model Orders {
+  id  String @id @default(uuid())
+  order_id String @unique
+  customer_name String
+  phone String
+  bag_number Int? 
+  status Status 
+  token_number Int?
+  token_date DateTime?
+  uploaded_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  Order_Lines Order_Lines[]
+  number_of_items Int
+  Token Tokens?
+  Audit Audit_Log[]
+}
+
+enum Status {
+  PACKAGED
+  PACKAGING_PENDING
+  HANDOVER
+  READY_FOR_PICKUP
+  TOKEN_ISSUED
+  DELIVERED
+}
+
+model Order_Lines {
+  id String @id @default(uuid())
+  order_ref_id String
+  product_name String 
+  order_ref Orders @relation(fields: [order_ref_id], references: [id])
+  packed Boolean
+}
+
+model Tokens {
+  id Int @id @default(autoincrement())
+  issued_date DateTime @default(now())
+  status TokenStatus
+  issued_by String
+  issuer User @relation("IssuedTokens", fields: [issued_by], references: [id])
+  cancelled_by String?
+  canceller User? @relation("CancelledTokens", fields: [cancelled_by], references: [id])
+  cancelled_at DateTime?
+  order_ref_id String @unique
+  order_ref Orders @relation(fields: [order_ref_id], references: [id])
+}
+
+enum TokenStatus {
+  ACTIVE 
+  CANCELLED
+}
+
+model Audit_Log {
+  id String @id @default(uuid())
+  at DateTime @default(now())
+  user_id String
+  user User @relation(fields: [user_id], references: [id])
+  username String
+  role String
+  action String
+  details Json?
+  order_ref_id String?
+  order_ref Orders? @relation(fields: [order_ref_id], references: [id])
+}
+
