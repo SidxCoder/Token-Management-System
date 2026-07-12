@@ -11,47 +11,48 @@ Full-stack implementation in **Next.js 16 (App Router)** — the existing app in
 | Framework | Next.js 16.2 (App Router, Turbopack) | Already scaffolded in `client/`; frontend + backend in one app |
 | Language | TypeScript | Already configured |
 | Styling | Tailwind CSS 4 | Already configured |
-| Database | SQLite via built-in `node:sqlite` | Zero native dependencies (Node 25 ships it); single-store scale fits SQLite perfectly |
+| Database | PostgreSQL via Prisma ORM | **Decision changed from SQLite/`node:sqlite`.** Typed schema + migrations; schema in `prisma/schema.prisma`, client generated to `lib/generated/prisma`, connection via `DATABASE_URL` |
 | Excel parsing | `xlsx` (SheetJS 0.20.3) | Already installed; parses/generates `.xlsx`, pure JS |
 | Auth | Session cookie + server-side sessions table | Simple, role-based; no external auth provider needed |
 | Real-time updates | Client polling (2–4 s interval) on dashboards & display | Simplest reliable option for a single-store LAN app; can upgrade to SSE later |
 
 ---
 
-## 2. Data Model (SQLite)
+## 2. Data Model (PostgreSQL via Prisma)
 
-Mirrors the two-sheet Excel design (Orders ↔ Items as FK relationship).
+Mirrors the two-sheet Excel design (Orders ↔ Items as FK relationship). Source of truth is `prisma/schema.prisma`; summary:
 
 ```
-users
-  id, username (unique), password_hash, display_name, role, active
-  role ∈ {admin, packager, greeter, runner, cashier}
+User
+  id (uuid pk), username (unique), password_hash, display_name, role, active
+  role ∈ {ADMIN, PACKAGER, GREETER, RUNNER, CASHIER}
 
-sessions
-  token (pk), user_id → users, created_at, expires_at
+Sessions
+  token (uuid pk), userId → User (cascade delete), created_at, expires_at
 
-orders
-  id (pk), order_id (unique, from Excel — the business key),
-  customer_name, phone, bag_number (nullable),
+Orders
+  id (uuid pk), order_id (unique, from Excel — the business key),
+  customer_name, phone (string), bag_number (int, nullable),
   status, token_number (nullable), token_date (nullable),
-  uploaded_at, updated_at
-  -- number_of_items and packed_count are DERIVED from order_lines, never stored
+  uploaded_at, updated_at, number_of_items
+  -- number_of_items is STORED, set once at import (lines are never added/removed
+     after upload); packed_count stays DERIVED from Order_Lines, never stored
 
-order_lines
-  id (pk), order_ref → orders, product_name, packed (0/1)
+Order_Lines
+  id (uuid pk), order_ref_id → Orders, product_name, packed (boolean)
 
-tokens
-  id (pk), token_date, number, order_ref → orders,
-  status ∈ {active, cancelled}, issued_by → users, issued_at,
-  cancelled_by, cancelled_at
-  UNIQUE (token_date, number)   -- sequential per day, never reused
+Tokens
+  id (autoincrement pk) — this IS the token number, globally sequential,
+  order_ref_id → Orders (UNIQUE — one token per order, ever),
+  status ∈ {ACTIVE, CANCELLED}, issued_by → User, issued_date,
+  cancelled_by (nullable) → User, cancelled_at (nullable)
 
-audit_log
-  id (pk), at, user_id, username, role,
-  order_ref (nullable), action, details (JSON text)
+Audit_Log
+  id (uuid pk), at, user_id → User, username + role (snapshots at time of action),
+  order_ref_id (nullable) → Orders, action, details (Json)
 ```
 
-Database file: `client/data/tms.db` (gitignored). Schema created + seeded on first access.
+Connection via `DATABASE_URL` (`.env`, gitignored). Schema applied with `prisma migrate dev`; seeding via `prisma/seed.ts`.
 
 **Seed data:** one user per role (`admin`, `packager`, `greeter`, `runner`, `cashier`) with default passwords, shown on the login page for demo purposes. Admin can add/deactivate users later.
 
@@ -71,7 +72,7 @@ uploaded ──▶ packaging_pending ──▶ packed ────────�
 handed_over_to_runner ──▶ ready_for_pickup ──▶ delivered
 ```
 
-Canonical statuses: `packaging_pending`, `packed`, `token_issued`, `handed_over_to_runner`, `ready_for_pickup`, `delivered`.
+Canonical statuses (`Status` enum in Prisma): `PACKAGING_PENDING`, `PACKAGED` (= packed), `TOKEN_ISSUED`, `HANDOVER` (= handed over to runner), `READY_FOR_PICKUP`, `DELIVERED`.
 
 Resolved BRD ambiguities (decisions):
 - **Customer Arrived + Token Issued** = one Greeter click → status `token_issued`; audit log records both events.
@@ -92,9 +93,9 @@ Resolved BRD ambiguities (decisions):
 ## 4. Token Rules
 
 - Generated only on customer arrival (Greeter/Admin action), never at upload.
-- Sequential per day: `next = MAX(number) WHERE token_date = today, + 1` — computed inside a transaction.
-- Daily reset via `token_date` scoping (BRD "recommended" → adopted).
-- Admin can cancel a token: token row → `cancelled`, order reverts to `packed`/`packaging_pending`, token number cleared from order. Cancelled rows remain in the table, so the number is **never reused** (cancel 3 → next customer gets 5 if 4 was issued).
+- **Globally sequential, no daily reset** (decision changed from the BRD's "recommended" daily reset): the token number is the `Tokens.id` autoincrement PK — the database hands out the next number atomically, no MAX+1 transaction needed. Numbers grow forever ("Token 4832" after months) — accepted trade-off.
+- **One token per order, ever** (`order_ref_id` is UNIQUE on `Tokens`): the token and the order are bound 1:1 at issuance.
+- Admin can cancel a token: token row → `CANCELLED`, order reverts to `PACKAGED`/`PACKAGING_PENDING`, token number cleared from order. If the customer later returns, the **same token is re-activated** (`CANCELLED` → `ACTIVE`, same number) — a second token row for the same order is impossible by design. Numbers are never reused **across orders** (autoincrement guarantees it).
 
 ---
 
@@ -204,7 +205,8 @@ Polling hook `useLiveData(url, intervalMs)` drives all dashboards and the displa
 
 ```
 lib/
-  db.ts          node:sqlite connection, schema DDL, seed
+  db.ts          Prisma client singleton (schema: prisma/schema.prisma,
+                 generated client: lib/generated/prisma, seed: prisma/seed.ts)
   auth.ts        password hashing, session create/verify, requireRole()
   orders.ts      workflow engine: transitions, guardrails, token issuance, audit
   excel.ts       two-sheet parse + validate, template generation
@@ -230,7 +232,9 @@ Each phase ends runnable — the app works incrementally, not only at the end.
 ## 11. Deliberate Scope Decisions
 
 - **Polling over WebSockets/SSE** — 2–4 s freshness is ample for a store floor; trivially upgradeable later.
-- **SQLite over Postgres** — single store, hundreds of orders/day; no infra to run. Swappable later behind `lib/db.ts`.
+- **Postgres + Prisma over SQLite** (changed during build) — typed schema, real migrations, `Json` column for audit details; Prisma keeps the data layer swappable.
+- **`number_of_items` stored on Orders** (changed from "always derive") — it is write-once at import since lines are never added/removed after upload; safe to store. `packed_count` remains derived. Caveat: any future admin edit that adds/removes line rows must update the count in the same transaction.
+- **Global token numbers, one token per order** (changed from daily-reset + reissue) — see §4.
 - **One bag per order** (BRD allows future multi-bag) — schema keeps `bag_number` on the order; multi-bag would move it to a table later.
 - **No-show orders** simply remain at their stage; admin reports show them. Carry-over/purge policy = open stakeholder question.
 - **Partial delivery** (item unavailable) not modeled — handled via Admin edit/override, flagged as open question.
