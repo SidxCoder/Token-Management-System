@@ -1,10 +1,17 @@
 import { prisma } from "@/lib/db";
+import { error } from "console";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest){
     const {username, password} = await req.json()
-
+    if (!username || !password) {
+        return NextResponse.json({
+            error: "username and password required"
+        },{
+            status:401
+        })
+    }
     const user =await  prisma.user.findUnique({
         where: {
             username: username,
