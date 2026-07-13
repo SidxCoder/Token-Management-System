@@ -4,7 +4,7 @@ import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest){
-    const {username, password} = await req.json()
+    const {username, password} = await req.json().catch(()=> null)
     if (!username || !password) {
         return NextResponse.json({
             error: "username and password required"
