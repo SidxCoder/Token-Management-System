@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
-import { ROLE_CONFIG } from "@/app/Components/Logins";
-import type { UserRole } from "@/app/Components/Logins";
+import { ROLE_CONFIG } from "@/app/components/logins";
+import type { UserRole } from "@/app/components/logins";
 import LogoutButton from "./LogoutButton";
 
 type DashboardShellProps = {
@@ -10,12 +10,7 @@ type DashboardShellProps = {
   children: ReactNode;
 };
 
-export default function DashboardShell({
-  role,
-  title,
-  description,
-  children,
-}: DashboardShellProps) {
+export default function DashboardShell({ role, title, description, children }: DashboardShellProps) {
   const config = ROLE_CONFIG[role];
 
   return (
@@ -23,18 +18,10 @@ export default function DashboardShell({
       <header className="border-b border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div>
-            <p
-              className={`text-xs font-semibold uppercase tracking-wider ${config.accent}`}
-            >
-              {config.label}
-            </p>
-            <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-              {title}
-            </h1>
+            <p className={`text-xs font-semibold uppercase tracking-wider ${config.accent}`}>{config.label}</p>
+            <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">{title}</h1>
             {description ? (
-              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-                {description}
-              </p>
+              <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{description}</p>
             ) : null}
           </div>
           <LogoutButton />

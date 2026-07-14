@@ -1,34 +1,8 @@
-"use client";
-
-import { useState } from "react";
-
-type ItemStatus = "Pending" | "Ready for collection" | "Collected from packager" | "Handed over to cashier";
-type Bag = { token: string; order: string; customer: string; number: string; items: { id: number; name: string; status: ItemStatus }[] };
-
-const initialBags: Bag[] = [
-  { token: "021", order: "ORD-1047", customer: "Dev Malhotra", number: "B-14", items: [{ id: 1, name: "Galaxy S24 FE", status: "Ready for collection" }, { id: 2, name: "Silicone Case", status: "Pending" }] },
-  { token: "022", order: "ORD-1051", customer: "Sara Khan", number: "B-15", items: [{ id: 1, name: "Galaxy Z Fold6", status: "Ready for collection" }, { id: 2, name: "Galaxy Watch7", status: "Ready for collection" }] },
-  { token: "023", order: "ORD-1056", customer: "Vihaan Roy", number: "B-18", items: [{ id: 1, name: "Galaxy S25 Ultra", status: "Collected from packager" }, { id: 2, name: "45W Power Adapter", status: "Pending" }] },
-];
-
 export default function RunnerDashboard() {
-  const [bags, setBags] = useState(initialBags);
-  const [selectedToken, setSelectedToken] = useState(initialBags[0].token);
-  const bag = bags.find((item) => item.token === selectedToken)!;
-  const ready = bag.items.filter((item) => item.status === "Ready for collection");
-  const collected = bag.items.filter((item) => item.status === "Collected from packager");
-  const collectedCount = bag.items.filter((item) => ["Collected from packager", "Handed over to cashier"].includes(item.status)).length;
-  const deliveredCount = bag.items.filter((item) => item.status === "Handed over to cashier").length;
-  const update = (change: (item: Bag) => Bag) => setBags((current) => current.map((item) => item.token === selectedToken ? change(item) : item));
-  const collect = () => update((current) => ({ ...current, items: current.items.map((item) => item.status === "Ready for collection" ? { ...item, status: "Collected from packager" } : item) }));
-  const deliver = () => update((current) => ({ ...current, items: current.items.map((item) => item.status === "Collected from packager" ? { ...item, status: "Handed over to cashier" } : item) }));
-
-  return <div className="grid gap-6 lg:grid-cols-[0.85fr_1.4fr]">
-    <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"><h2 className="font-semibold text-zinc-900 dark:text-zinc-50">Assigned tokens</h2><p className="mt-1 text-sm text-zinc-500">Bags ready for collection.</p><div className="mt-5 space-y-3">{bags.map((item) => <button key={item.token} onClick={() => setSelectedToken(item.token)} className={`w-full rounded-xl border p-4 text-left transition ${item.token === selectedToken ? "border-amber-500 bg-amber-50 dark:bg-amber-950/30" : "border-zinc-200 hover:border-amber-300 dark:border-zinc-800"}`}><div className="flex items-center justify-between gap-2"><p className="font-semibold text-zinc-900 dark:text-zinc-50">Token #{item.token}</p><BagState bag={item} /></div><p className="mt-1 text-sm text-zinc-500">{item.number} · {item.customer}</p><p className="mt-3 text-xs text-zinc-500">{count(item, "collected")}/{item.items.length} collected · {count(item, "delivered")}/{item.items.length} delivered</p></button>)}</div></section>
-    <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:p-6"><div className="flex items-start justify-between gap-3 border-b border-zinc-100 pb-5 dark:border-zinc-800"><div><p className="text-xs font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400">Bag details</p><h2 className="mt-1 text-xl font-bold text-zinc-900 dark:text-zinc-50">Token #{bag.token} · {bag.number}</h2><p className="mt-1 text-sm text-zinc-500">{bag.order} · {bag.customer}</p></div><BagState bag={bag} /></div><div className="mt-5 grid gap-3 sm:grid-cols-2"><Progress label="Collected from packager" value={`${collectedCount}/${bag.items.length} items`} /><Progress label="Handed to cashier" value={`${deliveredCount}/${bag.items.length} items`} /></div><div className="mt-6"><h3 className="font-semibold text-zinc-900 dark:text-zinc-50">Item status</h3><div className="mt-3 divide-y divide-zinc-100 rounded-xl border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">{bag.items.map((item) => <div key={item.id} className="flex items-center justify-between gap-3 p-4"><p className="text-sm text-zinc-800 dark:text-zinc-100">{item.name}</p><span className={`text-right text-xs font-semibold ${item.status === "Pending" ? "text-zinc-500" : item.status === "Ready for collection" ? "text-blue-700 dark:text-blue-400" : item.status === "Collected from packager" ? "text-amber-700 dark:text-amber-400" : "text-emerald-700 dark:text-emerald-400"}`}>{item.status}</span></div>)}</div></div><div className="mt-6 flex flex-col gap-3 sm:flex-row"><button onClick={collect} disabled={!ready.length} className="flex-1 rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-zinc-950 hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-zinc-300 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400">Collect {ready.length || ""} {ready.length === 1 ? "item" : "items"}</button><button onClick={deliver} disabled={!collected.length} className="flex-1 rounded-xl border border-emerald-600 px-4 py-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400 dark:text-emerald-400 dark:hover:bg-emerald-950/30 dark:disabled:border-zinc-800">Hand over to cashier</button></div></section>
-  </div>;
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <h2 className="text-lg font-semibold text-slate-900">Runner Dashboard</h2>
+      <p className="mt-2 text-sm text-slate-500">Collect bags and hand orders over to cashier.</p>
+    </section>
+  );
 }
-
-function count(bag: Bag, kind: "collected" | "delivered") { return bag.items.filter((item) => kind === "collected" ? ["Collected from packager", "Handed over to cashier"].includes(item.status) : item.status === "Handed over to cashier").length; }
-function Progress({ label, value }: { label: string; value: string }) { return <div className="rounded-xl bg-zinc-50 px-4 py-3 dark:bg-zinc-900"><p className="text-xs text-zinc-500">{label}</p><p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-50">{value}</p></div>; }
-function BagState({ bag }: { bag: Bag }) { const delivered = count(bag, "delivered"); const collected = count(bag, "collected"); const ready = bag.items.some((item) => item.status === "Ready for collection"); const label = delivered === bag.items.length ? "At cashier" : collected ? "Partial collection" : ready ? "Ready to collect" : "Waiting"; const color = label === "At cashier" ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300" : label === "Partial collection" ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300" : label === "Ready to collect" ? "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300" : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"; return <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${color}`}>{label}</span>; }

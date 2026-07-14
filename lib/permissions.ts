@@ -1,4 +1,4 @@
-import { Role } from "@prisma/client"; 
+import { Role } from "./generated/prisma/client"; 
 
 // Single source of truth for authorization (plan.md §6).
 // Every mutating API route must check `can(user.role, action)` before acting.

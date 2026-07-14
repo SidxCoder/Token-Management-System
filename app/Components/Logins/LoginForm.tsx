@@ -2,8 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ROLE_CONFIG } from "./roleConfig";
-import { loadDemoUsers } from "./demoAuth";
 
 export default function LoginForm() {
   const router = useRouter();
@@ -17,13 +15,23 @@ export default function LoginForm() {
     setError(null);
     setLoading(true);
 
-    const user = loadDemoUsers().find((candidate) => candidate.username === username.trim() && candidate.password === password && candidate.active);
-    if (!user) {
-      setError("Invalid username or password, or this account is inactive.");
+    const response = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ username: username.trim(), password }),
+    });
+
+    const result = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      setError(result?.error ?? "Unable to sign in. Please try again.");
       setLoading(false);
       return;
     }
-    router.push(ROLE_CONFIG[user.role].homePath);
+
+    router.push("/dashboard");
     router.refresh();
     setLoading(false);
   }
@@ -32,9 +40,7 @@ export default function LoginForm() {
     <div className="w-full max-w-md">
       <div className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
         <div className="mb-8 text-center">
-          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-            Sign in
-          </h1>
+          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">Sign in</h1>
           <p className="mt-2 text-sm text-zinc-500 dark:text-zinc-400">
             Enter the credentials set by your administrator.
           </p>

@@ -1,8 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ALL_ROLES, ROLE_CONFIG, type UserRole } from "@/app/Components/Logins";
-import { loadDemoUsers, saveDemoUsers, type DemoUser } from "@/app/Components/Logins/demoAuth";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { ALL_ROLES, ROLE_CONFIG, type UserRole } from "@/app/components/logins";
+import { loadDemoUsers, saveDemoUsers, type DemoUser } from "@/app/components/logins/demoAuth";
 
 const roleStyles: Record<UserRole, string> = {
   admin: "bg-rose-50 text-rose-700 ring-rose-600/20",
@@ -18,7 +18,7 @@ export default function UserManagement() {
   const [users, setUsers] = useState<DemoUser[]>(loadDemoUsers);
   const [query, setQuery] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyUser);
   const [visiblePasswords, setVisiblePasswords] = useState<string[]>([]);
   const [showFormPassword, setShowFormPassword] = useState(false);
@@ -55,27 +55,43 @@ export default function UserManagement() {
     if (!display_name || !username || (!editingId && !form.password)) return;
 
     if (editingId) {
-      setUsers((current) => current.map((user) => user.id === editingId ? {
-        ...user, display_name, username, role: form.role,
-        ...(form.password ? { password: form.password } : {}),
-      } : user));
+      setUsers((current) =>
+        current.map((user) =>
+          user.id === editingId
+            ? {
+                ...user,
+                display_name,
+                username,
+                role: form.role,
+                ...(form.password ? { password: form.password } : {}),
+              }
+            : user,
+        ),
+      );
     } else {
-      setUsers((current) => [{
-        id: crypto.randomUUID(),
-        display_name, username, password: form.password, role: form.role, active: true,
-      }, ...current]);
+      setUsers((current) => [
+        {
+          id: crypto.randomUUID(),
+          display_name,
+          username,
+          password: form.password,
+          role: form.role,
+          active: true,
+        },
+        ...current,
+      ]);
     }
     setShowForm(false);
   }
 
   function changeRole(id: string, role: UserRole) {
-    setUsers((current) => current.map((user) => user.id === id ? { ...user, role } : user));
+    setUsers((current) => current.map((user) => (user.id === id ? { ...user, role } : user)));
   }
 
   function toggleStatus(id: string) {
-    setUsers((current) => current.map((user) => user.id === id ? {
-      ...user, active: !user.active,
-    } : user));
+    setUsers((current) =>
+      current.map((user) => (user.id === id ? { ...user, active: !user.active } : user)),
+    );
   }
 
   function deleteUser(id: string) {
@@ -84,9 +100,9 @@ export default function UserManagement() {
   }
 
   function togglePassword(id: string) {
-    setVisiblePasswords((current) => current.includes(id)
-      ? current.filter((userId) => userId !== id)
-      : [...current, id]);
+    setVisiblePasswords((current) =>
+      current.includes(id) ? current.filter((userId) => userId !== id) : [...current, id],
+    );
   }
 
   const activeUsers = users.filter((user) => user.active).length;
@@ -98,7 +114,10 @@ export default function UserManagement() {
           <h2 className="text-lg font-semibold text-slate-900">Manage users</h2>
           <p className="mt-1 text-sm text-slate-500">Create accounts and control staff access.</p>
         </div>
-        <button onClick={openCreate} className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700">
+        <button
+          onClick={openCreate}
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+        >
           <span className="text-lg leading-none">+</span> Add user
         </button>
       </div>
@@ -113,14 +132,25 @@ export default function UserManagement() {
         <label className="relative mb-5 block max-w-md">
           <span className="sr-only">Search users</span>
           <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">⌕</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by name, username, or role" className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100" />
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search by name, username, or role"
+            className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+          />
         </label>
 
-        {showForm && (
+        {showForm ? (
           <form onSubmit={saveUser} className="mb-6 rounded-xl border border-indigo-100 bg-indigo-50/50 p-5">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="font-semibold text-slate-900">{editingId ? "Edit user" : "New user"}</h3>
-              <button type="button" onClick={() => setShowForm(false)} className="text-sm font-medium text-slate-500 hover:text-slate-900">Cancel</button>
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="text-sm font-medium text-slate-500 hover:text-slate-900"
+              >
+                Cancel
+              </button>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
               <Input label="Display name" value={form.display_name} onChange={(display_name) => setForm({ ...form, display_name })} placeholder="e.g. Anaya Singh" />
@@ -134,7 +164,7 @@ export default function UserManagement() {
             </div>
             <button type="submit" className="mt-5 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700">{editingId ? "Save changes" : "Create user"}</button>
           </form>
-        )}
+        ) : null}
 
         <div className="overflow-x-auto rounded-xl border border-slate-200">
           <table className="min-w-[760px] w-full text-left text-sm">
