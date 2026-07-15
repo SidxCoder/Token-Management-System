@@ -47,7 +47,6 @@ model Orders {
   order_id String @unique
   customer_name String
   phone String
-  bag_number Int? 
   status Status 
   token_number Int?
   token_date DateTime?
@@ -72,8 +71,10 @@ model Order_Lines {
   id String @id @default(uuid())
   order_ref_id String
   product_name String 
+  bag_number Int? 
+  sku_code String?
+  sku_description String?
   order_ref Orders @relation(fields: [order_ref_id], references: [id])
-  packed Boolean
 }
 
 model Tokens {
