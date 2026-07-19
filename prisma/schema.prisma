@@ -54,7 +54,7 @@ model Orders {
   updated_at DateTime @updatedAt
   Order_Lines Order_Lines[]
   number_of_items Int
-  Token Tokens?
+  Token Tokens[]
   Audit Audit_Log[]
 }
 
@@ -86,7 +86,7 @@ model Tokens {
   cancelled_by String?
   canceller User? @relation("CancelledTokens", fields: [cancelled_by], references: [id])
   cancelled_at DateTime?
-  order_ref_id String @unique
+  order_ref_id String 
   order_ref Orders @relation(fields: [order_ref_id], references: [id])
 }
 
