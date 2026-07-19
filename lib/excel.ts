@@ -95,6 +95,8 @@ export function parseOrdersWorkbook(buf: Buffer): { errors: UploadError[]; order
   });
 
   const itemRows = XLSX.utils.sheet_to_json<Row>(itemsSheet, { defval: "" });
+  // bag number -> owning order_id: a bag may repeat within one order, never across two
+  const bagOwner = new Map<number, string>();
 
   itemRows.forEach((r, i) => {
     const rowNum = i + 2;
@@ -133,6 +135,19 @@ export function parseOrdersWorkbook(buf: Buffer): { errors: UploadError[]; order
     }
 
     if (!ok) return;
+
+    if (bag_number !== null) {
+      const owner = bagOwner.get(bag_number);
+      if (owner && owner !== order_id) {
+        errors.push({
+          sheet: "Items",
+          row: rowNum,
+          message: `Bag Number ${bag_number} is already used by order "${owner}" - a bag cannot span two orders`,
+        });
+        return;
+      }
+      bagOwner.set(bag_number, order_id);
+    }
 
     const parent = orders.get(order_id);
     if (!parent) {

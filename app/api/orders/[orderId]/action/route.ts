@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { issueToken, WorkflowError } from "@/lib/orders";
+import { issueToken, setBagNumber, WorkflowError } from "@/lib/orders";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest, { params }: {params: Promise< {orderId: string}> }){
@@ -19,9 +19,11 @@ export async function POST(req: NextRequest, { params }: {params: Promise< {orde
         switch ( action ) {
             case "issue_token":
                 return NextResponse.json( await issueToken(user, orderId));
+            case "set_bag_number":
+                return NextResponse.json( await setBagNumber(user,orderId, payload));
             default:
                 return NextResponse.json({
-                    error: `unknown action "${action}`
+                    error: `unknown action "${action}"`
                 },{
                     status: 400
                 })

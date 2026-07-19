@@ -29,6 +29,23 @@ export async function POST(req:NextRequest){
         for (const e of exisitng){
             errors.push({sheet: "Orders", row: 0, message: `ORDER ID "${e.order_id}" already exists`})
         }
+
+        // Bag uniqueness vs the DB: bags of undelivered orders are taken;
+        // delivered orders have released theirs.
+        const bags = orders.flatMap((o) => o.items.map((i) => i.bag_number))
+            .filter((n): n is number => n !== null)
+        if (bags.length) {
+            const clashes = await prisma.order_Lines.findMany({
+                where: { bag_number: { in: bags }, order_ref: { status: { not: "DELIVERED" } } },
+                include: { order_ref: { select: { order_id: true } } },
+            })
+            for (const c of clashes) {
+                errors.push({
+                    sheet: "Items", row: 0,
+                    message: `Bag Number ${c.bag_number} is already in use by existing order "${c.order_ref.order_id}"`,
+                })
+            }
+        }
     }
     if(errors.length) return NextResponse.json({errors}, {status: 400})
 

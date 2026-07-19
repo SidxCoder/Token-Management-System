@@ -36,16 +36,18 @@ Orders
   status, token_number (nullable), token_date (nullable),
   uploaded_at, updated_at, number_of_items
   -- number_of_items is STORED, set once at import (lines are never added/removed
-     after upload); packed_count stays DERIVED from Order_Lines, never stored
+     after upload); bagged/packed counts stay DERIVED from Order_Lines, never stored
 
 Order_Lines
   id (uuid pk), order_ref_id → Orders, product_name, sku_code, sku_description,
-  packed (boolean), bag_number (int, nullable)
+  bag_number (int, nullable)
   -- bag numbers are PER LINE: each product can ship in its own bag
+  -- there is NO separate packed flag: a line WITH a bag number IS packed
 
 Tokens
   id (autoincrement pk) — this IS the token number, globally sequential,
-  order_ref_id → Orders (UNIQUE — one token per order, ever),
+  order_ref_id → Orders (MANY rows per order allowed; only ONE with status
+  ACTIVE at a time — enforced in code, not by a DB constraint),
   status ∈ {ACTIVE, CANCELLED}, issued_by → User, issued_date,
   cancelled_by (nullable) → User, cancelled_at (nullable)
 
@@ -69,8 +71,8 @@ uploaded ──▶ packaging_pending ──▶ packed ────────�
                     │                                  │
                     │  (customer may arrive            ▼
                     │   before packing done)    token_issued ──▶ handed_over_to_runner
-                    └──────────────▶ token_issued       (requires ALL lines packed
-                                                         + every line's bag number set)
+                    └──────────────▶ token_issued       (requires every line's bag
+                                                         number set = every line packed)
 handed_over_to_runner ──▶ ready_for_pickup ──▶ delivered
 ```
 
@@ -79,15 +81,14 @@ Canonical statuses (`Status` enum in Prisma): `PACKAGING_PENDING`, `PACKAGED` (=
 Resolved BRD ambiguities (decisions):
 - **Customer Arrived + Token Issued** = one Greeter click → status `token_issued`; audit log records both events.
 - **Handed Over to Cashier + Ready for Pickup** = one Runner click → status `ready_for_pickup` (order appears on display immediately, per BRD step 10); audit records "Handed Over to Cashier".
-- **Uploaded** = transient; upload immediately lands on `packaging_pending` (any line unpacked) or `packed` (all lines packed).
+- **Uploaded** = transient; upload immediately lands on `packaging_pending` (any line without a bag number) or `packed` (every line bagged).
 - **Packager "Handed Over to Runner" vs Runner "Collected from Packager"** = same transition (`token_issued → handed_over_to_runner`); either role's button performs it, audit records who.
 
 ### Guardrails (enforced server-side)
-- Token can be issued from `packaging_pending` **or** `packed` (customer may arrive early). One active token per order; one token per customer visit.
-- `→ handed_over_to_runner` is **blocked** unless all lines packed **and** every line has a bag number.
-- Line packing toggles allowed only **before** handover.
-- Bag numbers: Packager (or Admin) may **assign** a line's bag number only while it is empty and before handover. Once assigned, **only Admin** can edit or remove it (enforced server-side).
-- Marking all lines packed flips `packaging_pending → packed` (and back if unticked) — only while in those two statuses.
+- Token can be issued from `packaging_pending` **or** `packed` (customer may arrive early). Only one ACTIVE token per order at a time (checked in the issue transaction).
+- `→ handed_over_to_runner` is **blocked** unless every line has a bag number.
+- Bag numbers (HARD LOCK): Packager (or Admin) may **assign** a line's bag number only while it is empty. Once assigned, **only Admin** can edit or remove it — regardless of order stage (enforced server-side). Clearing a bag number is how a line is "un-packed".
+- Order status is recomputed from the lines after every bag change: all lines bagged → `packed`, else `packaging_pending` — but only while the order is in one of those two statuses (a bag change never regresses `token_issued` or later stages).
 - `→ delivered` only from `ready_for_pickup` (cashier verifies token first).
 - Admin bypasses all of the above (skip workflow, override any stage, direct-to-cashier).
 
@@ -97,27 +98,27 @@ Resolved BRD ambiguities (decisions):
 
 - Generated only on customer arrival (Greeter/Admin action), never at upload.
 - **Globally sequential, no daily reset** (decision changed from the BRD's "recommended" daily reset): the token number is the `Tokens.id` autoincrement PK — the database hands out the next number atomically, no MAX+1 transaction needed. Numbers grow forever ("Token 4832" after months) — accepted trade-off.
-- **One token per order, ever** (`order_ref_id` is UNIQUE on `Tokens`): the token and the order are bound 1:1 at issuance.
-- Admin can cancel a token: token row → `CANCELLED`, order reverts to `PACKAGED`/`PACKAGING_PENDING`, token number cleared from order. If the customer later returns, the **same token is re-activated** (`CANCELLED` → `ACTIVE`, same number) — a second token row for the same order is impossible by design. Numbers are never reused **across orders** (autoincrement guarantees it).
+- **Tokens are regenerative** (changed from the earlier one-token-per-order design): an order may receive multiple tokens over its life, but only **one ACTIVE at a time** — the issue transaction rejects if an ACTIVE row exists.
+- Admin can cancel a token: the ACTIVE row → `CANCELLED` (+ `cancelled_by`/`cancelled_at`), order reverts to `PACKAGED`/`PACKAGING_PENDING`, token number cleared from the order. A cancelled row is closed **permanently** — if the customer returns, the greeter issues a **fresh token with a new number**. Cancelled rows remain as history, so numbers are never reused anywhere (autoincrement guarantees it).
 
 ---
 
 ## 5. Excel Upload (two-sheet workbook, FK style)
 
 **Sheet "Orders"** — one row per order: `Order ID | Customer Name | Phone Number`
-**Sheet "Items"** — one row per product: `Order ID | Product Name | SKU Code | SKU Description | Packed (Yes/No) | Bag Number (optional)`
+**Sheet "Items"** — one row per product: `Order ID | Product Name | SKU Code | SKU Description | Bag Number (optional — a row WITH a bag number imports as already packed)`
 
-Derived on import: number of items = count of item rows; status = all packed → `packed`, else `packaging_pending`.
+Derived on import: number of items = count of item rows; status = every line has a bag number → `packed`, else `packaging_pending`.
 
 ### Validation (all-or-nothing import)
 1. Both sheets present (matched by name), headers correct.
 2. Order ID unique within Orders sheet **and** not already in DB.
 3. Every Items row references an existing Orders row (no orphans).
 4. Every order has ≥ 1 item row (no childless orders).
-5. Mandatory cells non-empty; phone numeric; Packed ∈ {Yes, No}.
+5. Mandatory cells non-empty; phone numeric (7–15 digits, validated as a string).
 6. No duplicate SKU Code within the same order; Bag Number, if present, numeric.
 
-Any failure → nothing is imported; response lists every error with sheet + row number + reason (rendered in the UI, downloadable). Success → import summary (X orders, Y items, Z already-packed).
+Any failure → nothing is imported; response lists every error with sheet + row number + reason (rendered in the UI, downloadable). Success → import summary (X orders, Y items, Z fully-bagged/pre-packed).
 
 A **downloadable template** (`.xlsx` with both sheets, headers, 2 example rows) is generated server-side.
 
@@ -127,15 +128,14 @@ Post-upload, **the app is the source of truth**: packing ticks and bag numbers c
 
 ## 6. Auth & Permissions
 
-- Login page → `POST /api/auth/login` → verify scrypt password hash → create session row → httpOnly cookie.
+- Login page → `POST /api/auth/login` → verify password (stored as **plaintext** — deliberate internal-project decision, see §11) → create session row → httpOnly cookie.
 - Every API route + page resolves the session server-side; pages redirect to `/login`, APIs return 401/403.
 - Central permission map (single source of truth):
 
 | Action | Packager | Greeter | Runner | Cashier | Admin |
 |---|:-:|:-:|:-:|:-:|:-:|
 | Upload Excel | ✅ | | | | ✅ |
-| Toggle line packed / mark all packed | ✅ | | | | ✅ |
-| Assign bag number (line, while empty) | ✅ | | | | ✅ |
+| Assign bag number (line, while empty — this IS packing) | ✅ | | | | ✅ |
 | Edit/remove an assigned bag number | | | | | ✅ |
 | Search orders | ✅ | ✅ | | | ✅ |
 | Generate token | | ✅ | | | ✅ |
@@ -156,13 +156,14 @@ POST   /api/auth/login            body: {username, password}
 POST   /api/auth/logout
 GET    /api/auth/me
 
-GET    /api/orders                ?q= (name/phone/orderId) &status= &view=<role-view>
+GET    /api/orders                ?q= (name/phone/orderId) &status= &page= (100/page,
+                                  returns total + totalPages)
 GET    /api/orders/:orderId       full detail incl. lines + audit slice
 POST   /api/orders/upload         multipart .xlsx → all-or-nothing import
 GET    /api/orders/template       downloadable two-sheet template
 
 POST   /api/orders/:orderId/action    body: {action, ...payload}
-       actions: issue_token · toggle_line · mark_all_packed · set_bag_number ·
+       actions: issue_token · set_bag_number ·
                 hand_to_runner · hand_to_cashier · deliver ·
                 cancel_token · override_status · edit_fields   (role-checked)
 
@@ -189,8 +190,8 @@ app/
     greeter/                  Search (name/phone/Order ID) → verify → Generate
                               Token (big result: "Token 12") → issued-tokens list
     packager/                 Tabs: Pending Packaging · Packed · Awaiting Runner
-                              (token alert banner) — line checklists (3/5),
-                              per-line bag-number assign, Hand Over to Runner
+                              (token alert banner) — per-line bag assignment
+                              with progress (3/5 bagged), Hand Over to Runner
     runner/                   New tokens (with packed/not-packed indicator) ·
                               Collect Bag · Handed Over to Cashier
     cashier/                  Ready-for-pickup queue · verify by token number ·
@@ -212,7 +213,7 @@ Polling hook `useLiveData(url, intervalMs)` drives all dashboards and the displa
 lib/
   db.ts          Prisma client singleton (schema: prisma/schema.prisma,
                  generated client: lib/generated/prisma, seed: prisma/seed.ts)
-  auth.ts        password hashing, session create/verify, requireRole()
+  auth.ts        session create/verify (getSessionUser); plaintext passwords by decision
   orders.ts      workflow engine: transitions, guardrails, token issuance, audit
   excel.ts       two-sheet parse + validate, template generation
   permissions.ts action → roles map
@@ -239,7 +240,9 @@ Each phase ends runnable — the app works incrementally, not only at the end.
 - **Polling over WebSockets/SSE** — 2–4 s freshness is ample for a store floor; trivially upgradeable later.
 - **Postgres + Prisma over SQLite** (changed during build) — typed schema, real migrations, `Json` column for audit details; Prisma keeps the data layer swappable.
 - **`number_of_items` stored on Orders** (changed from "always derive") — it is write-once at import since lines are never added/removed after upload; safe to store. `packed_count` remains derived. Caveat: any future admin edit that adds/removes line rows must update the count in the same transaction.
-- **Global token numbers, one token per order** (changed from daily-reset + reissue) — see §4.
+- **Global token numbers; tokens are regenerative** (changed twice: daily-reset dropped, then one-token-per-order dropped) — multiple token rows per order over time, one ACTIVE at a time, numbers never reused; see §4.
+- **No separate `packed` flag** — a line with a bag number IS packed; un-packing = clearing the bag number, which falls under the hard lock (Admin-only once assigned).
+- **Plaintext passwords** (internal LAN app, deliberate) — the `password_hash` column stores plaintext; revisit (hash + rename column) if the app ever leaves the store LAN.
 - **Bags are per-line** (changed from one-bag-per-order) — `bag_number` lives on `Order_Lines`; each product can ship in its own bag. Assigned bag numbers are locked for everyone except Admin.
 - **Order lines keep `product_name` alongside `sku_code`/`sku_description`** — client's Items sheet carries all three.
 - **No-show orders** simply remain at their stage; admin reports show them. Carry-over/purge policy = open stakeholder question.
