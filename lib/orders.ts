@@ -1,5 +1,5 @@
 import { prisma } from "./db";
-import { Prisma, Role } from "./generated/prisma/client";
+import { Prisma, Role, Status } from "./generated/prisma/client";
 import { can } from "./permissions";
 
 export class WorkflowError extends Error {
@@ -141,4 +141,120 @@ export async function setBagNumber(user: Actor, orderId: string, payload: {lineI
 
         return updated;
     })
+}
+
+export async function handToRunner(user:Actor, orderId: string) {
+    if(!can(user.role, "hand_to_runner")) throw new WorkflowError(403, "forbidden");
+
+    return prisma.$transaction(async (tx) => {
+        const order = await loadOrder(tx, orderId);
+        if( order.status !== "TOKEN_ISSUED") {
+            throw new WorkflowError(409, `cannot hand to runner while orde ris ${order.status}`)
+        }
+
+        const unbagged = order.Order_Lines.filter((l)=> l.bag_number == null).length;
+        if(unbagged > 0) {
+            throw new WorkflowError(409, `${unbagged} of ${order.Order_Lines.length} items have no bag number`)
+        }
+        const updated = await tx.orders.update({
+            where: { id: order.id},
+            data: {status: "HANDOVER"},
+            include: {Order_Lines: true, Token: { where: { status: "ACTIVE" } } }
+        });
+        await logAction(tx, user, "hand_to_runner", order.id, {});
+        return updated;
+    })
+}
+
+export async function handToCashier(user:Actor, orderId: string) {
+    if(!can(user.role, "hand_to_cashier")) throw new WorkflowError(403, "forbidden");
+
+    return prisma.$transaction(async (tx) => {
+        const order = await loadOrder(tx, orderId);
+        if( order.status !== "HANDOVER") {
+            throw new WorkflowError(409, `cannot hand to cashier while order is ${order.status}`)
+        }
+
+        const unbagged = order.Order_Lines.filter((l)=> l.bag_number == null).length;
+        if(unbagged > 0) {
+            throw new WorkflowError(409, `${unbagged} of ${order.Order_Lines.length} items have no bag number`)
+        }
+        const updated = await tx.orders.update({
+            where: { id: order.id},
+            data: {status: "READY_FOR_PICKUP"},
+            include: {Order_Lines: true, Token: { where: { status: "ACTIVE" } } }
+        });
+        await logAction(tx, user, "hand_to_cashier", order.id, {});
+        return updated;
+    })
+}
+
+export async function deliver(user:Actor, orderId: string){
+    if(!can(user.role, "deliver")) throw new WorkflowError(403, "forbidden");
+
+    return prisma.$transaction(async (tx) => {
+        const order = await loadOrder(tx, orderId);
+        if( order.status !== "READY_FOR_PICKUP") {
+            throw new WorkflowError(409, `cannot deliver while order is ${order.status}`)
+        }
+
+        const unbagged = order.Order_Lines.filter((l)=> l.bag_number == null).length;
+        if(unbagged > 0) {
+            throw new WorkflowError(409, `${unbagged} of ${order.Order_Lines.length} items have no bag number`)
+        }
+        const updated = await tx.orders.update({
+            where: { id: order.id},
+            data: {status: "DELIVERED"},
+            include: {Order_Lines: true, Token: { where: { status: "ACTIVE" } } }
+        });
+        await logAction(tx, user, "deliver", order.id, {});
+        return updated;
+    })
+}
+
+
+export async function cancelOrder(user:Actor, orderId: string){
+    if (!can(user.role, "cancel_token")) throw new WorkflowError(403, "forbidden");
+
+      return prisma.$transaction(async (tx) => {
+          const order = await loadOrder(tx, orderId);
+          const active = order.Token.find((t) => t.status === "ACTIVE");
+          if (!active) throw new WorkflowError(409, "no active token on this order");
+
+          await tx.tokens.update({
+              where: { id: active.id },
+              data: { status: "CANCELLED", cancelled_by: user.id, cancelled_at: new Date()
+  },
+          });
+
+          const status = order.Order_Lines.every((l) => l.bag_number !== null)
+              ? "PACKAGED" : "PACKAGING_PENDING";
+
+          const updated = await tx.orders.update({
+              where: { id: order.id },
+              data: { token_number: null, token_date: null, status },
+              include: { Order_Lines: true, Token: { where: { status: "ACTIVE" } } },
+          });
+          await logAction(tx, user, "cancel_token", order.id, { token: active.id });
+          return updated;
+      });
+}
+
+export async function OverrideStatus(user:Actor, orderId: string, payload: { status?: string}){
+    if (!can(user.role, "override_status")) throw new WorkflowError(403, "forbidden");
+      const target = payload.status;
+      if (!target || !(target in Status)) {
+          throw new WorkflowError(400, `status must be one of: ${Object.keys(Status).join(",")}`);
+      }
+      return prisma.$transaction(async (tx) => {
+          const order = await loadOrder(tx, orderId);
+          const updated = await tx.orders.update({
+              where: { id: order.id },
+              data: { status: target as Status },
+              include: { Order_Lines: true, Token: { where: { status: "ACTIVE" } } },
+          });
+          await logAction(tx, user, "override_status", order.id, { from: order.status, to:
+  target });
+          return updated;
+      });
 }
