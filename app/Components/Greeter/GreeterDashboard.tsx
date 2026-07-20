@@ -27,9 +27,16 @@ export default function GreeterDashboard() {
   }, []);
 
   useEffect(() => {
-    void load();
-    const id = window.setInterval(() => void load(), 4000);
-    return () => window.clearInterval(id);
+    const initial = window.setTimeout(() => {
+      void load();
+    }, 0);
+    const id = window.setInterval(() => {
+      void load();
+    }, 4000);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(id);
+    };
   }, [load]);
 
   const results = useMemo(() => {
@@ -88,6 +95,16 @@ export default function GreeterDashboard() {
           </div>
         </div>
       </section>
+
+      {orders.length === 0 ? (
+        <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+          <h3 className="text-base font-semibold text-zinc-900">No orders yet</h3>
+          <p className="mt-2 text-sm text-zinc-500">
+            The greeter dashboard only shows data after an Excel sheet is uploaded and orders exist in the database.
+            `PACKAGER` and `ADMIN` can upload the sheet.
+          </p>
+        </section>
+      ) : null}
 
       {error ? (
         <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>

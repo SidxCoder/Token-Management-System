@@ -1,5 +1,4 @@
 import { prisma } from "@/lib/db";
-import { error } from "console";
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -12,14 +11,13 @@ export async function POST(req: NextRequest){
             status:401
         })
     }
-    const user =await  prisma.user.findUnique({
+    const user = await prisma.user.findUnique({
         where: {
-            username: username,
-            password_hash: password
-        }
-    })
+            username,
+        },
+    });
 
-    if(!user || !user?.active){
+    if (!user || !user.active || user.password_hash !== password) {
         return NextResponse.json({
             error: "invalid credentials"
         },{

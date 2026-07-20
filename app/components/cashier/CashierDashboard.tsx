@@ -31,9 +31,16 @@ export default function CashierDashboard() {
   }, []);
 
   useEffect(() => {
-    void load();
-    const id = window.setInterval(() => void load(), 4000);
-    return () => window.clearInterval(id);
+    const initial = window.setTimeout(() => {
+      void load();
+    }, 0);
+    const id = window.setInterval(() => {
+      void load();
+    }, 4000);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(id);
+    };
   }, [load]);
 
   const order = orders.find((o) => o.order_id === selectedId) ?? null;
