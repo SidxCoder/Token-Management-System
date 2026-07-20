@@ -1,286 +1,203 @@
 "use client";
 
-import { useState } from "react";
-
-type ItemStatus =
-  | "Pending"
-  | "Ready for collection"
-  | "Collected from packager"
-  | "Handed over to cashier";
-
-type BagItem = {
-  id: string;
-  name: string;
-  status: ItemStatus;
-};
-
-type Bag = {
-  token: number;
-  number: string;
-  customer: string;
-  order: string;
-  items: BagItem[];
-};
-
-const initialBags: Bag[] = [
-  {
-    token: 12,
-    number: "BAG-12",
-    customer: "Aisha Khan",
-    order: "ORD-2401",
-    items: [
-      { id: "1", name: "Basmati Rice 5kg", status: "Ready for collection" },
-      { id: "2", name: "Cooking Oil 1L", status: "Ready for collection" },
-      { id: "3", name: "Toor Dal 1kg", status: "Pending" },
-    ],
-  },
-  {
-    token: 15,
-    number: "BAG-15",
-    customer: "Rahul Mehta",
-    order: "ORD-2408",
-    items: [
-      {
-        id: "4",
-        name: "Atta 10kg",
-        status: "Collected from packager",
-      },
-      {
-        id: "5",
-        name: "Sugar 1kg",
-        status: "Ready for collection",
-      },
-    ],
-  },
-  {
-    token: 18,
-    number: "BAG-18",
-    customer: "Priya Sharma",
-    order: "ORD-2412",
-    items: [
-      {
-        id: "6",
-        name: "Tea Leaves 500g",
-        status: "Collected from packager",
-      },
-      {
-        id: "7",
-        name: "Milk Powder 400g",
-        status: "Collected from packager",
-      },
-    ],
-  },
-];
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  baggedCount,
+  fetchOrders,
+  orderAction,
+  statusLabel,
+  type Order,
+} from "@/app/components/shared/api";
 
 export default function RunnerDashboard() {
-  const [bags, setBags] = useState(initialBags);
-  const [selectedToken, setSelectedToken] = useState(initialBags[0].token);
-  const bag = bags.find((item) => item.token === selectedToken)!;
-  const ready = bag.items.filter(
-    (item) => item.status === "Ready for collection",
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const data = await fetchOrders();
+      const relevant = data.filter((o) =>
+        ["TOKEN_ISSUED", "HANDOVER"].includes(o.status),
+      );
+      setOrders(relevant);
+      setSelectedId((current) =>
+        current && relevant.some((o) => o.order_id === current)
+          ? current
+          : (relevant[0]?.order_id ?? null),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load orders");
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    const id = window.setInterval(() => void load(), 4000);
+    return () => window.clearInterval(id);
+  }, [load]);
+
+  const order = orders.find((o) => o.order_id === selectedId) ?? null;
+
+  const summary = useMemo(
+    () => ({
+      collect: orders.filter((o) => o.status === "TOKEN_ISSUED").length,
+      handover: orders.filter((o) => o.status === "HANDOVER").length,
+    }),
+    [orders],
   );
-  const collected = bag.items.filter(
-    (item) => item.status === "Collected from packager",
-  );
-  const collectedCount = bag.items.filter((item) =>
-    ["Collected from packager", "Handed over to cashier"].includes(item.status),
-  ).length;
-  const deliveredCount = bag.items.filter(
-    (item) => item.status === "Handed over to cashier",
-  ).length;
 
-  const update = (change: (item: Bag) => Bag) =>
-    setBags((current) =>
-      current.map((item) =>
-        item.token === selectedToken ? change(item) : item,
-      ),
-    );
+  async function collectBag() {
+    if (!order) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await orderAction(order.order_id, "hand_to_runner");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Collect failed");
+    } finally {
+      setBusy(false);
+    }
+  }
 
-  const collect = () =>
-    update((current) => ({
-      ...current,
-      items: current.items.map((item) =>
-        item.status === "Ready for collection"
-          ? { ...item, status: "Collected from packager" }
-          : item,
-      ),
-    }));
-
-  const deliver = () =>
-    update((current) => ({
-      ...current,
-      items: current.items.map((item) =>
-        item.status === "Collected from packager"
-          ? { ...item, status: "Handed over to cashier" }
-          : item,
-      ),
-    }));
+  async function handToCashier() {
+    if (!order) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await orderAction(order.order_id, "hand_to_cashier");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Handover failed");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[0.85fr_1.4fr]">
-      <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-        <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">
-          Assigned tokens
-        </h2>
-        <p className="mt-1 text-sm text-zinc-500">Bags ready for collection.</p>
-        <div className="mt-5 space-y-3">
-          {bags.map((item) => (
-            <button
-              key={item.token}
-              onClick={() => setSelectedToken(item.token)}
-              className={`w-full rounded-xl border p-4 text-left transition ${
-                item.token === selectedToken
-                  ? "border-amber-500 bg-amber-50 dark:bg-amber-950/30"
-                  : "border-zinc-200 hover:border-amber-300 dark:border-zinc-800"
-              }`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <p className="font-semibold text-zinc-900 dark:text-zinc-50">
-                  Token #{item.token}
-                </p>
-                <BagState bag={item} />
-              </div>
-              <p className="mt-1 text-sm text-zinc-500">
-                {item.number} · {item.customer}
-              </p>
-              <p className="mt-3 text-xs text-zinc-500">
-                {count(item, "collected")}/{item.items.length} collected ·{" "}
-                {count(item, "delivered")}/{item.items.length} delivered
-              </p>
-            </button>
-          ))}
-        </div>
-      </section>
+    <div className="space-y-6">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Count label="Ready to collect" value={summary.collect} />
+        <Count label="Awaiting cashier" value={summary.handover} />
+      </div>
 
-      <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:p-6">
-        <div className="flex items-start justify-between gap-3 border-b border-zinc-100 pb-5 dark:border-zinc-800">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400">
-              Bag details
-            </p>
-            <h2 className="mt-1 text-xl font-bold text-zinc-900 dark:text-zinc-50">
-              Token #{bag.token} · {bag.number}
-            </h2>
-            <p className="mt-1 text-sm text-zinc-500">
-              {bag.order} · {bag.customer}
-            </p>
-          </div>
-          <BagState bag={bag} />
-        </div>
+      {error ? (
+        <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
+      ) : null}
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
-          <Progress
-            label="Collected from packager"
-            value={`${collectedCount}/${bag.items.length} items`}
-          />
-          <Progress
-            label="Handed to cashier"
-            value={`${deliveredCount}/${bag.items.length} items`}
-          />
-        </div>
-
-        <div className="mt-6">
-          <h3 className="font-semibold text-zinc-900 dark:text-zinc-50">
-            Item status
-          </h3>
-          <div className="mt-3 divide-y divide-zinc-100 rounded-xl border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
-            {bag.items.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-center justify-between gap-3 p-4"
+      <div className="grid gap-6 lg:grid-cols-[0.85fr_1.4fr]">
+        <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+          <h2 className="font-semibold">Assigned tokens</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Collect from packager, then hand to cashier.
+          </p>
+          <div className="mt-4 space-y-3">
+            {orders.map((item) => (
+              <button
+                key={item.order_id}
+                onClick={() => setSelectedId(item.order_id)}
+                className={`w-full rounded-xl border p-4 text-left ${
+                  item.order_id === selectedId
+                    ? "border-amber-500 bg-amber-50"
+                    : "border-zinc-200 hover:border-amber-300"
+                }`}
               >
-                <p className="text-sm text-zinc-800 dark:text-zinc-100">
-                  {item.name}
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-semibold">
+                    Token #{item.token_number ?? "—"}
+                  </p>
+                  <span className="text-xs font-semibold text-zinc-500">
+                    {statusLabel(item.status)}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm text-zinc-500">
+                  {item.order_id} · {item.customer_name}
                 </p>
-                <span
-                  className={`text-right text-xs font-semibold ${
-                    item.status === "Pending"
-                      ? "text-zinc-500"
-                      : item.status === "Ready for collection"
-                        ? "text-blue-700 dark:text-blue-400"
-                        : item.status === "Collected from packager"
-                          ? "text-amber-700 dark:text-amber-400"
-                          : "text-emerald-700 dark:text-emerald-400"
-                  }`}
-                >
-                  {item.status}
+                <p className="mt-2 text-xs text-zinc-500">
+                  {baggedCount(item)}/{item.Order_Lines.length} bagged
+                </p>
+              </button>
+            ))}
+            {orders.length === 0 && (
+              <p className="py-8 text-center text-sm text-zinc-500">
+                No tokens waiting for runner.
+              </p>
+            )}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6">
+          {!order ? (
+            <p className="py-16 text-center text-sm text-zinc-500">
+              Select a token to continue.
+            </p>
+          ) : (
+            <>
+              <div className="flex items-start justify-between border-b border-zinc-100 pb-5">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-amber-700">
+                    Bag details
+                  </p>
+                  <h2 className="mt-1 text-xl font-bold">
+                    Token #{order.token_number ?? "—"}
+                  </h2>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    {order.order_id} · {order.customer_name}
+                  </p>
+                </div>
+                <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                  {statusLabel(order.status)}
                 </span>
               </div>
-            ))}
-          </div>
-        </div>
 
-        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-          <button
-            onClick={collect}
-            disabled={!ready.length}
-            className="flex-1 rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-zinc-950 hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-zinc-300 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400"
-          >
-            Collect {ready.length || ""}{" "}
-            {ready.length === 1 ? "item" : "items"}
-          </button>
-          <button
-            onClick={deliver}
-            disabled={!collected.length}
-            className="flex-1 rounded-xl border border-emerald-600 px-4 py-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400 dark:text-emerald-400 dark:hover:bg-emerald-950/30 dark:disabled:border-zinc-800"
-          >
-            Hand over to cashier
-          </button>
-        </div>
-      </section>
+              <div className="mt-6 divide-y divide-zinc-100 rounded-xl border border-zinc-200">
+                {order.Order_Lines.map((line) => (
+                  <div
+                    key={line.id}
+                    className="flex items-center justify-between gap-3 p-4"
+                  >
+                    <p className="text-sm text-zinc-800">{line.product_name}</p>
+                    <span className="text-xs font-semibold text-zinc-500">
+                      {line.bag_number != null
+                        ? `Bag ${line.bag_number}`
+                        : "No bag"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                <button
+                  onClick={collectBag}
+                  disabled={order.status !== "TOKEN_ISSUED" || busy}
+                  className="flex-1 rounded-xl bg-amber-500 px-4 py-3 text-sm font-semibold text-zinc-950 hover:bg-amber-400 disabled:cursor-not-allowed disabled:bg-zinc-300"
+                >
+                  Collect bag
+                </button>
+                <button
+                  onClick={handToCashier}
+                  disabled={order.status !== "HANDOVER" || busy}
+                  className="flex-1 rounded-xl border border-emerald-600 px-4 py-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400"
+                >
+                  Hand over to cashier
+                </button>
+              </div>
+            </>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
 
-function count(bag: Bag, kind: "collected" | "delivered") {
-  return bag.items.filter((item) =>
-    kind === "collected"
-      ? ["Collected from packager", "Handed over to cashier"].includes(
-          item.status,
-        )
-      : item.status === "Handed over to cashier",
-  ).length;
-}
-
-function Progress({ label, value }: { label: string; value: string }) {
+function Count({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl bg-zinc-50 px-4 py-3 dark:bg-zinc-900">
-      <p className="text-xs text-zinc-500">{label}</p>
-      <p className="mt-1 font-semibold text-zinc-900 dark:text-zinc-50">
-        {value}
-      </p>
+    <div className="rounded-xl border border-zinc-200 bg-white px-5 py-4 shadow-sm">
+      <p className="text-sm text-zinc-500">{label}</p>
+      <p className="mt-1 text-2xl font-bold text-zinc-900">{value}</p>
     </div>
-  );
-}
-
-function BagState({ bag }: { bag: Bag }) {
-  const delivered = count(bag, "delivered");
-  const collected = count(bag, "collected");
-  const ready = bag.items.some(
-    (item) => item.status === "Ready for collection",
-  );
-  const label =
-    delivered === bag.items.length
-      ? "At cashier"
-      : collected
-        ? "Partial collection"
-        : ready
-          ? "Ready to collect"
-          : "Waiting";
-  const color =
-    label === "At cashier"
-      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
-      : label === "Partial collection"
-        ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
-        : label === "Ready to collect"
-          ? "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300"
-          : "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300";
-
-  return (
-    <span
-      className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${color}`}
-    >
-      {label}
-    </span>
   );
 }

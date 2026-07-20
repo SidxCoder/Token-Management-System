@@ -3,23 +3,12 @@
 import { useEffect, useState } from "react";
 
 type DisplayOrder = {
-  token: number;
-  orderId: string;
+  token: number | null;
+  order: string;
 };
 
-const demoReadyOrders: DisplayOrder[] = [
-  { token: 12, orderId: "ORD-1042" },
-  { token: 15, orderId: "ORD-1047" },
-  { token: 18, orderId: "ORD-1051" },
-];
-
-function maskOrderId(orderId: string) {
-  if (orderId.length <= 4) return orderId;
-  return `${orderId.slice(0, 3)}•••${orderId.slice(-2)}`;
-}
-
 export default function CustomerDisplayPage() {
-  const [orders, setOrders] = useState(demoReadyOrders);
+  const [orders, setOrders] = useState<DisplayOrder[]>([]);
   const [clock, setClock] = useState("");
 
   useEffect(() => {
@@ -31,15 +20,21 @@ export default function CustomerDisplayPage() {
           second: "2-digit",
         }).format(new Date()),
       );
-
     tick();
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
   }, []);
 
-  // Demo refresh placeholder — later this will poll /api/display
   useEffect(() => {
-    setOrders(demoReadyOrders);
+    async function load() {
+      const res = await fetch("/api/display");
+      if (!res.ok) return;
+      const data = (await res.json()) as DisplayOrder[];
+      setOrders(Array.isArray(data) ? data.filter((o) => o.token != null) : []);
+    }
+    void load();
+    const id = window.setInterval(() => void load(), 3000);
+    return () => window.clearInterval(id);
   }, []);
 
   return (
@@ -65,7 +60,7 @@ export default function CustomerDisplayPage() {
           <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
             {orders.map((order) => (
               <article
-                key={order.token}
+                key={`${order.token}-${order.order}`}
                 className="rounded-3xl border border-zinc-800 bg-zinc-900 px-8 py-10 text-center shadow-lg"
               >
                 <p className="text-sm font-semibold uppercase tracking-widest text-zinc-400">
@@ -74,9 +69,7 @@ export default function CustomerDisplayPage() {
                 <p className="mt-3 text-7xl font-black tracking-tight text-emerald-400 sm:text-8xl">
                   {String(order.token).padStart(2, "0")}
                 </p>
-                <p className="mt-6 text-lg text-zinc-400">
-                  {maskOrderId(order.orderId)}
-                </p>
+                <p className="mt-6 text-lg text-zinc-400">{order.order}</p>
                 <p className="mt-4 inline-block rounded-full bg-emerald-500/15 px-4 py-2 text-sm font-semibold text-emerald-400">
                   Ready for Pickup
                 </p>

@@ -1,251 +1,268 @@
 "use client";
 
-import { useMemo, useState } from "react";
-
-type ProductStatus = "Pending" | "Packed" | "Handed to runner";
-type Product = {
-  id: number;
-  name: string;
-  quantity: number;
-  status: ProductStatus;
-};
-type Bag = {
-  id: string;
-  customer: string;
-  bagNumber: string;
-  products: Product[];
-};
-
-const initialBags: Bag[] = [
-  {
-    id: "ORD-1042",
-    customer: "Ananya Patel",
-    bagNumber: "",
-    products: [
-      { id: 1, name: "Galaxy S25 Ultra", quantity: 1, status: "Pending" },
-      { id: 2, name: "Galaxy Buds3 Pro", quantity: 1, status: "Pending" },
-      { id: 3, name: "45W Power Adapter", quantity: 1, status: "Pending" },
-    ],
-  },
-  {
-    id: "ORD-1047",
-    customer: "Dev Malhotra",
-    bagNumber: "B-14",
-    products: [
-      { id: 1, name: "Galaxy S24 FE", quantity: 1, status: "Packed" },
-      { id: 2, name: "Silicone Case", quantity: 1, status: "Pending" },
-    ],
-  },
-  {
-    id: "ORD-1051",
-    customer: "Sara Khan",
-    bagNumber: "B-15",
-    products: [
-      { id: 1, name: "Galaxy Z Fold6", quantity: 1, status: "Handed to runner" },
-      { id: 2, name: "Galaxy Watch7", quantity: 1, status: "Pending" },
-    ],
-  },
-];
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  baggedCount,
+  fetchOrders,
+  orderAction,
+  statusLabel,
+  type Order,
+} from "@/app/components/shared/api";
 
 export default function PackagerDashboard() {
-  const [bags, setBags] = useState(initialBags);
-  const [selectedId, setSelectedId] = useState(initialBags[0].id);
-  const bag = bags.find((current) => current.id === selectedId)!;
-  const packedProducts = bag.products.filter(
-    (product) => product.status === "Packed",
-  );
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [bagDrafts, setBagDrafts] = useState<Record<string, string>>({});
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const data = await fetchOrders();
+      const relevant = data.filter((o) =>
+        ["PACKAGING_PENDING", "PACKAGED", "TOKEN_ISSUED"].includes(o.status),
+      );
+      setOrders(relevant);
+      setSelectedId((current) =>
+        current && relevant.some((o) => o.order_id === current)
+          ? current
+          : (relevant[0]?.order_id ?? null),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load orders");
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    const id = window.setInterval(() => void load(), 4000);
+    return () => window.clearInterval(id);
+  }, [load]);
+
+  const order = orders.find((o) => o.order_id === selectedId) ?? null;
+
   const summary = useMemo(
     () => ({
-      pending: bags.filter((current) => bagStatus(current) === "Pending")
-        .length,
-      partial: bags.filter((current) =>
-        ["Partially Packed", "Partial Handover"].includes(bagStatus(current)),
-      ).length,
-      handedOver: bags.filter(
-        (current) => bagStatus(current) === "Handed to runner",
-      ).length,
+      pending: orders.filter((o) => o.status === "PACKAGING_PENDING").length,
+      packaged: orders.filter((o) => o.status === "PACKAGED").length,
+      tokenIssued: orders.filter((o) => o.status === "TOKEN_ISSUED").length,
     }),
-    [bags],
+    [orders],
   );
 
-  function updateBag(update: (current: Bag) => Bag) {
-    setBags((current) =>
-      current.map((item) => (item.id === selectedId ? update(item) : item)),
-    );
+  async function assignBag(lineId: string) {
+    if (!order) return;
+    const raw = bagDrafts[lineId]?.trim();
+    const bagNumber = Number(raw);
+    if (!raw || !Number.isInteger(bagNumber) || bagNumber < 1) {
+      setError("Enter a positive bag number");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await orderAction(order.order_id, "set_bag_number", {
+        lineId,
+        bagNumber,
+      });
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to set bag number");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function togglePacked(productId: number) {
-    updateBag((current) => ({
-      ...current,
-      products: current.products.map((product) =>
-        product.id === productId && product.status !== "Handed to runner"
-          ? {
-              ...product,
-              status: product.status === "Packed" ? "Pending" : "Packed",
-            }
-          : product,
-      ),
-    }));
+  async function handToRunner() {
+    if (!order) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await orderAction(order.order_id, "hand_to_runner");
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to hand over");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function handOverPackedProducts() {
-    if (!packedProducts.length) return;
-    updateBag((current) => ({
-      ...current,
-      products: current.products.map((product) =>
-        product.status === "Packed"
-          ? { ...product, status: "Handed to runner" }
-          : product,
-      ),
-    }));
+  async function uploadExcel(file: File) {
+    setUploading(true);
+    setError(null);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch("/api/orders/upload", { method: "POST", body });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const msg =
+          Array.isArray(data.errors) && data.errors[0]?.message
+            ? data.errors[0].message
+            : (data.error ?? "Upload failed");
+        throw new Error(msg);
+      }
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setUploading(false);
+    }
   }
+
+  const allBagged = order
+    ? order.Order_Lines.every((l) => l.bag_number != null)
+    : false;
+  const canHandOver = order?.status === "TOKEN_ISSUED" && allBagged;
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Count
-          label="Pending bags"
-          value={summary.pending}
-          tone="text-zinc-700"
-        />
-        <Count
-          label="Partial bags"
-          value={summary.partial}
-          tone="text-amber-700"
-        />
-        <Count
-          label="Handed to runner"
-          value={summary.handedOver}
-          tone="text-emerald-700"
-        />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="grid flex-1 gap-3 sm:grid-cols-3">
+          <Count label="Pending" value={summary.pending} />
+          <Count label="Packaged" value={summary.packaged} />
+          <Count label="Token issued" value={summary.tokenIssued} />
+        </div>
+        <label className="inline-flex cursor-pointer items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700">
+          {uploading ? "Uploading…" : "Upload Excel"}
+          <input
+            type="file"
+            accept=".xlsx"
+            className="hidden"
+            disabled={uploading}
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) void uploadExcel(file);
+              event.target.value = "";
+            }}
+          />
+        </label>
       </div>
 
+      {error ? (
+        <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
+      ) : null}
+
       <div className="grid gap-6 lg:grid-cols-[0.85fr_1.4fr]">
-        <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="mb-4">
-            <h2 className="font-semibold text-zinc-900 dark:text-zinc-50">
-              Bag queue
-            </h2>
-            <p className="mt-1 text-sm text-zinc-500">
-              Select a bag to pack or hand over.
-            </p>
-          </div>
-          <div className="space-y-3">
-            {bags.map((item) => (
+        <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+          <h2 className="font-semibold">Bag queue</h2>
+          <p className="mt-1 text-sm text-zinc-500">
+            Assign bag numbers, then hand over after token is issued.
+          </p>
+          <div className="mt-4 space-y-3">
+            {orders.map((item) => (
               <button
-                key={item.id}
-                onClick={() => setSelectedId(item.id)}
-                className={`w-full rounded-xl border p-4 text-left transition ${
-                  item.id === selectedId
-                    ? "border-blue-500 bg-blue-50 dark:bg-blue-950/30"
-                    : "border-zinc-200 hover:border-blue-300 dark:border-zinc-800"
+                key={item.order_id}
+                onClick={() => setSelectedId(item.order_id)}
+                className={`w-full rounded-xl border p-4 text-left ${
+                  item.order_id === selectedId
+                    ? "border-blue-500 bg-blue-50"
+                    : "border-zinc-200 hover:border-blue-300"
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <p className="font-semibold text-zinc-900 dark:text-zinc-50">
-                    {item.id}
-                  </p>
-                  <BagBadge status={bagStatus(item)} />
+                  <p className="font-semibold">{item.order_id}</p>
+                  <span className="text-xs font-semibold text-zinc-500">
+                    {statusLabel(item.status)}
+                  </span>
                 </div>
-                <p className="mt-1 text-sm text-zinc-500">{item.customer}</p>
-                <p className="mt-3 text-xs text-zinc-500">
-                  Bag: {item.bagNumber || "Not assigned"} ·{" "}
-                  {productProgress(item)}
+                <p className="mt-1 text-sm text-zinc-500">{item.customer_name}</p>
+                <p className="mt-2 text-xs text-zinc-500">
+                  {baggedCount(item)}/{item.Order_Lines.length} bagged
                 </p>
               </button>
             ))}
+            {orders.length === 0 && (
+              <p className="py-8 text-center text-sm text-zinc-500">
+                No packing orders. Upload an Excel file to begin.
+              </p>
+            )}
           </div>
         </section>
 
-        <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 sm:p-6">
-          <div className="flex items-start justify-between gap-3 border-b border-zinc-100 pb-5 dark:border-zinc-800">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-blue-700 dark:text-blue-400">
-                Bag details
-              </p>
-              <h2 className="mt-1 text-xl font-bold text-zinc-900 dark:text-zinc-50">
-                {bag.id}
-              </h2>
-              <p className="mt-1 text-sm text-zinc-500">{bag.customer}</p>
-            </div>
-            <BagBadge status={bagStatus(bag)} />
-          </div>
-
-          <label className="mt-5 block max-w-xs text-sm font-semibold text-zinc-800 dark:text-zinc-200">
-            Assign or scan bag
-            <input
-              value={bag.bagNumber}
-              onChange={(event) =>
-                updateBag((current) => ({
-                  ...current,
-                  bagNumber: event.target.value,
-                }))
-              }
-              placeholder="e.g. B-12"
-              className="mt-2 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2.5 font-normal text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50"
-            />
-          </label>
-
-          <div className="mt-6">
-            <div className="flex items-center justify-between">
-              <h3 className="font-semibold text-zinc-900 dark:text-zinc-50">
-                Product packing
-              </h3>
-              <span className="text-sm text-zinc-500">
-                {productProgress(bag)}
-              </span>
-            </div>
-            <div className="mt-3 divide-y divide-zinc-100 rounded-xl border border-zinc-200 dark:divide-zinc-800 dark:border-zinc-800">
-              {bag.products.map((product) => (
-                <div key={product.id} className="flex items-center gap-3 p-4">
-                  <button
-                    type="button"
-                    onClick={() => togglePacked(product.id)}
-                    disabled={product.status === "Handed to runner"}
-                    aria-label={`Toggle ${product.name} packed`}
-                    className={`grid h-5 w-5 place-items-center rounded border text-xs font-bold ${
-                      product.status === "Packed"
-                        ? "border-blue-600 bg-blue-600 text-white"
-                        : product.status === "Handed to runner"
-                          ? "border-emerald-600 bg-emerald-600 text-white"
-                          : "border-zinc-300 text-transparent"
-                    }`}
-                  >
-                    ✓
-                  </button>
-                  <span
-                    className={`flex-1 text-sm ${
-                      product.status === "Handed to runner"
-                        ? "text-zinc-400 line-through"
-                        : "text-zinc-800 dark:text-zinc-100"
-                    }`}
-                  >
-                    {product.name}
-                  </span>
-                  <span className="text-xs text-zinc-500">
-                    ×{product.quantity}
-                  </span>
-                  <ProductBadge status={product.status} />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <button
-            onClick={handOverPackedProducts}
-            disabled={!packedProducts.length || !bag.bagNumber.trim()}
-            className="mt-6 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-zinc-300 dark:disabled:bg-zinc-700"
-          >
-            Hand over{" "}
-            {packedProducts.length
-              ? `${packedProducts.length} packed product${packedProducts.length === 1 ? "" : "s"}`
-              : "packed products"}{" "}
-            to runner
-          </button>
-          {!bag.bagNumber.trim() && (
-            <p className="mt-3 text-center text-xs text-zinc-500">
-              Assign a bag before handing products to the runner.
+        <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6">
+          {!order ? (
+            <p className="py-16 text-center text-sm text-zinc-500">
+              Select an order from the queue.
             </p>
+          ) : (
+            <>
+              <div className="flex items-start justify-between border-b border-zinc-100 pb-5">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-blue-700">
+                    Order details
+                  </p>
+                  <h2 className="mt-1 text-xl font-bold">{order.order_id}</h2>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    {order.customer_name}
+                    {order.token_number != null
+                      ? ` · Token #${order.token_number}`
+                      : ""}
+                  </p>
+                </div>
+                <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800">
+                  {statusLabel(order.status)}
+                </span>
+              </div>
+
+              <div className="mt-6">
+                <h3 className="font-semibold">Line bag numbers</h3>
+                <div className="mt-3 divide-y divide-zinc-100 rounded-xl border border-zinc-200">
+                  {order.Order_Lines.map((line) => (
+                    <div
+                      key={line.id}
+                      className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center"
+                    >
+                      <p className="flex-1 text-sm text-zinc-800">
+                        {line.product_name}
+                      </p>
+                      {line.bag_number != null ? (
+                        <span className="text-sm font-semibold text-emerald-700">
+                          Bag {line.bag_number}
+                        </span>
+                      ) : (
+                        <div className="flex gap-2">
+                          <input
+                            value={bagDrafts[line.id] ?? ""}
+                            onChange={(event) =>
+                              setBagDrafts((current) => ({
+                                ...current,
+                                [line.id]: event.target.value,
+                              }))
+                            }
+                            placeholder="Bag #"
+                            className="w-24 rounded-lg border border-zinc-300 px-3 py-2 text-sm"
+                          />
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => assignBag(line.id)}
+                            className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                          >
+                            Assign
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                onClick={handToRunner}
+                disabled={!canHandOver || busy}
+                className="mt-6 w-full rounded-xl bg-emerald-600 px-4 py-3 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-zinc-300"
+              >
+                Hand over to runner
+              </button>
+              {!canHandOver && (
+                <p className="mt-3 text-center text-xs text-zinc-500">
+                  Needs token issued and every line bagged.
+                </p>
+              )}
+            </>
           )}
         </section>
       </div>
@@ -253,68 +270,11 @@ export default function PackagerDashboard() {
   );
 }
 
-function bagStatus(bag: Bag) {
-  const statuses = bag.products.map((product) => product.status);
-  if (statuses.every((status) => status === "Handed to runner"))
-    return "Handed to runner";
-  if (statuses.includes("Handed to runner")) return "Partial Handover";
-  if (statuses.every((status) => status === "Packed")) return "Packed";
-  if (statuses.includes("Packed")) return "Partially Packed";
-  return "Pending";
-}
-
-function productProgress(bag: Bag) {
-  const packed = bag.products.filter(
-    (product) => product.status !== "Pending",
-  ).length;
-  return `${packed}/${bag.products.length} items processed`;
-}
-
-function Count({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: number;
-  tone: string;
-}) {
+function Count({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white px-5 py-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
+    <div className="rounded-xl border border-zinc-200 bg-white px-5 py-4 shadow-sm">
       <p className="text-sm text-zinc-500">{label}</p>
-      <p className={`mt-1 text-2xl font-bold ${tone}`}>{value}</p>
+      <p className="mt-1 text-2xl font-bold text-zinc-900">{value}</p>
     </div>
-  );
-}
-
-function BagBadge({ status }: { status: ReturnType<typeof bagStatus> }) {
-  const classes =
-    status === "Pending"
-      ? "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
-      : status === "Partially Packed"
-        ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
-        : status === "Packed"
-          ? "bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300"
-          : "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300";
-  return (
-    <span
-      className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${classes}`}
-    >
-      {status}
-    </span>
-  );
-}
-
-function ProductBadge({ status }: { status: ProductStatus }) {
-  const classes =
-    status === "Pending"
-      ? "text-zinc-500"
-      : status === "Packed"
-        ? "text-blue-700 dark:text-blue-400"
-        : "text-emerald-700 dark:text-emerald-400";
-  return (
-    <span className={`w-28 text-right text-xs font-semibold ${classes}`}>
-      {status}
-    </span>
   );
 }

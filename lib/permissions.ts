@@ -7,7 +7,7 @@ export const PERMISSIONS = {
   toggle_line: [Role.PACKAGER, Role.ADMIN],
   mark_all_packed: [Role.PACKAGER, Role.ADMIN],
   set_bag_number: [Role.PACKAGER, Role.ADMIN],
-  search_orders: [Role.PACKAGER, Role.GREETER, Role.ADMIN],
+  search_orders: [Role.PACKAGER, Role.GREETER, Role.RUNNER, Role.CASHIER, Role.ADMIN],
   issue_token: [Role.GREETER, Role.ADMIN],
   hand_to_runner: [Role.PACKAGER, Role.RUNNER, Role.ADMIN],
   hand_to_cashier: [Role.RUNNER, Role.ADMIN],
