@@ -12,12 +12,11 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+/* This app is a light-only design: every surface is a hardcoded white card
+   with zinc text. A prefers-color-scheme:dark override here would flip the
+   inherited text color to near-white and make uncolored headings vanish on
+   the white cards, so it is intentionally omitted. The /display screen sets
+   its own dark colors explicitly and is unaffected. */
 
 body {
   background: var(--background);

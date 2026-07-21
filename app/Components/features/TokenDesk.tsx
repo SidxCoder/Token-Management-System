@@ -8,7 +8,8 @@ import {
   type Order,
 } from "@/app/components/shared/api";
 
-export default function GreeterDashboard() {
+// Token issuing desk (issue_token permission).
+export default function TokenDesk() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -27,12 +28,8 @@ export default function GreeterDashboard() {
   }, []);
 
   useEffect(() => {
-    const initial = window.setTimeout(() => {
-      void load();
-    }, 0);
-    const id = window.setInterval(() => {
-      void load();
-    }, 4000);
+    const initial = window.setTimeout(() => void load(), 0);
+    const id = window.setInterval(() => void load(), 4000);
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(id);
@@ -60,8 +57,7 @@ export default function GreeterDashboard() {
 
   const selected = orders.find((o) => o.order_id === selectedId) ?? null;
   const canIssue =
-    selected?.status === "PACKAGING_PENDING" ||
-    selected?.status === "PACKAGED";
+    selected?.status === "PACKAGING_PENDING" || selected?.status === "PACKAGED";
 
   async function issueToken() {
     if (!selected || !canIssue) return;
@@ -80,28 +76,12 @@ export default function GreeterDashboard() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-2xl bg-emerald-700 px-6 py-6 text-white shadow-sm sm:px-8">
-        <p className="text-sm font-semibold text-emerald-100">GREETER DESK</p>
-        <div className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h2 className="text-2xl font-bold">Welcome back</h2>
-            <p className="mt-1 text-sm text-emerald-100">
-              Find a customer&apos;s order and issue their collection token.
-            </p>
-          </div>
-          <div className="rounded-xl bg-white/10 px-4 py-3">
-            <p className="text-xs text-emerald-100">Tokens with numbers</p>
-            <p className="text-2xl font-bold">{issued.length}</p>
-          </div>
-        </div>
-      </section>
-
       {orders.length === 0 ? (
         <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
           <h3 className="text-base font-semibold text-zinc-900">No orders yet</h3>
           <p className="mt-2 text-sm text-zinc-500">
-            The greeter dashboard only shows data after an Excel sheet is uploaded and orders exist in the database.
-            `PACKAGER` and `ADMIN` can upload the sheet.
+            Tokens can only be issued after orders exist. A packager or admin must
+            import the Excel sheet first.
           </p>
         </section>
       ) : null}
@@ -126,9 +106,7 @@ export default function GreeterDashboard() {
         <div className="grid gap-6 lg:grid-cols-[1.4fr_0.9fr]">
           <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6">
             <label className="block">
-              <span className="text-sm font-semibold text-zinc-800">
-                Search order
-              </span>
+              <span className="text-sm font-semibold text-zinc-800">Search order</span>
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
@@ -168,9 +146,7 @@ export default function GreeterDashboard() {
             {!selected ? (
               <div className="grid min-h-56 place-items-center text-center">
                 <div>
-                  <p className="text-lg font-semibold text-zinc-800">
-                    Select an order
-                  </p>
+                  <p className="text-lg font-semibold text-zinc-800">Select an order</p>
                   <p className="mt-2 text-sm text-zinc-500">
                     Choose a result to issue a token.
                   </p>
@@ -191,11 +167,7 @@ export default function GreeterDashboard() {
                   <Row label="Status" value={statusLabel(selected.status)} />
                   <Row
                     label="Token"
-                    value={
-                      selected.token_number != null
-                        ? `#${selected.token_number}`
-                        : "—"
-                    }
+                    value={selected.token_number != null ? `#${selected.token_number}` : "—"}
                   />
                 </dl>
                 <button

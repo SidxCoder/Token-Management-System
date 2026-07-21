@@ -8,7 +8,8 @@ import {
   type Order,
 } from "@/app/components/shared/api";
 
-export default function CashierDashboard() {
+// Cashier delivery desk: verify token and mark delivered (deliver permission).
+export default function DeliveryDesk() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tokenInput, setTokenInput] = useState("");
@@ -31,12 +32,8 @@ export default function CashierDashboard() {
   }, []);
 
   useEffect(() => {
-    const initial = window.setTimeout(() => {
-      void load();
-    }, 0);
-    const id = window.setInterval(() => {
-      void load();
-    }, 4000);
+    const initial = window.setTimeout(() => void load(), 0);
+    const id = window.setInterval(() => void load(), 4000);
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(id);
@@ -82,9 +79,7 @@ export default function CashierDashboard() {
       <div className="grid gap-6 lg:grid-cols-[0.85fr_1.4fr]">
         <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
           <h2 className="font-semibold">Incoming orders</h2>
-          <p className="mt-1 text-sm text-zinc-500">
-            Orders handed over by the runner.
-          </p>
+          <p className="mt-1 text-sm text-zinc-500">Orders handed over by the runner.</p>
           <div className="mt-4 space-y-3">
             {orders.map((item) => (
               <button
@@ -100,9 +95,7 @@ export default function CashierDashboard() {
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <p className="font-semibold">
-                    Token #{item.token_number ?? "—"}
-                  </p>
+                  <p className="font-semibold">Token #{item.token_number ?? "—"}</p>
                   <span className="text-xs font-semibold text-zinc-500">
                     {statusLabel(item.status)}
                   </span>
@@ -147,9 +140,7 @@ export default function CashierDashboard() {
                   >
                     <p className="text-sm text-zinc-800">{line.product_name}</p>
                     <span className="text-xs font-semibold text-zinc-500">
-                      {line.bag_number != null
-                        ? `Bag ${line.bag_number}`
-                        : "—"}
+                      {line.bag_number != null ? `Bag ${line.bag_number}` : "—"}
                     </span>
                   </div>
                 ))}

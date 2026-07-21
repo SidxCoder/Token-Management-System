@@ -9,13 +9,13 @@ import {
   type Order,
 } from "@/app/components/shared/api";
 
-export default function PackagerDashboard() {
+// Bag assignment + handover to runner (set_bag_number permission).
+export default function PackingQueue() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [bagDrafts, setBagDrafts] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [uploading, setUploading] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -36,12 +36,8 @@ export default function PackagerDashboard() {
   }, []);
 
   useEffect(() => {
-    const initial = window.setTimeout(() => {
-      void load();
-    }, 0);
-    const id = window.setInterval(() => {
-      void load();
-    }, 4000);
+    const initial = window.setTimeout(() => void load(), 0);
+    const id = window.setInterval(() => void load(), 4000);
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(id);
@@ -70,10 +66,7 @@ export default function PackagerDashboard() {
     setBusy(true);
     setError(null);
     try {
-      await orderAction(order.order_id, "set_bag_number", {
-        lineId,
-        bagNumber,
-      });
+      await orderAction(order.order_id, "set_bag_number", { lineId, bagNumber });
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to set bag number");
@@ -96,29 +89,6 @@ export default function PackagerDashboard() {
     }
   }
 
-  async function uploadExcel(file: File) {
-    setUploading(true);
-    setError(null);
-    try {
-      const body = new FormData();
-      body.append("file", file);
-      const res = await fetch("/api/orders/upload", { method: "POST", body });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const msg =
-          Array.isArray(data.errors) && data.errors[0]?.message
-            ? data.errors[0].message
-            : (data.error ?? "Upload failed");
-        throw new Error(msg);
-      }
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Upload failed");
-    } finally {
-      setUploading(false);
-    }
-  }
-
   const allBagged = order
     ? order.Order_Lines.every((l) => l.bag_number != null)
     : false;
@@ -126,26 +96,10 @@ export default function PackagerDashboard() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="grid flex-1 gap-3 sm:grid-cols-3">
-          <Count label="Pending" value={summary.pending} />
-          <Count label="Packaged" value={summary.packaged} />
-          <Count label="Token issued" value={summary.tokenIssued} />
-        </div>
-        <label className="inline-flex cursor-pointer items-center justify-center rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700">
-          {uploading ? "Uploading…" : "Upload Excel"}
-          <input
-            type="file"
-            accept=".xlsx"
-            className="hidden"
-            disabled={uploading}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void uploadExcel(file);
-              event.target.value = "";
-            }}
-          />
-        </label>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Count label="Pending" value={summary.pending} />
+        <Count label="Packaged" value={summary.packaged} />
+        <Count label="Token issued" value={summary.tokenIssued} />
       </div>
 
       {error ? (
@@ -183,7 +137,7 @@ export default function PackagerDashboard() {
             ))}
             {orders.length === 0 && (
               <p className="py-8 text-center text-sm text-zinc-500">
-                No packing orders. Upload an Excel file to begin.
+                No packing orders. Import an Excel file to begin.
               </p>
             )}
           </div>
@@ -204,9 +158,7 @@ export default function PackagerDashboard() {
                   <h2 className="mt-1 text-xl font-bold">{order.order_id}</h2>
                   <p className="mt-1 text-sm text-zinc-500">
                     {order.customer_name}
-                    {order.token_number != null
-                      ? ` · Token #${order.token_number}`
-                      : ""}
+                    {order.token_number != null ? ` · Token #${order.token_number}` : ""}
                   </p>
                 </div>
                 <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-800">
@@ -222,9 +174,7 @@ export default function PackagerDashboard() {
                       key={line.id}
                       className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center"
                     >
-                      <p className="flex-1 text-sm text-zinc-800">
-                        {line.product_name}
-                      </p>
+                      <p className="flex-1 text-sm text-zinc-800">{line.product_name}</p>
                       {line.bag_number != null ? (
                         <span className="text-sm font-semibold text-emerald-700">
                           Bag {line.bag_number}

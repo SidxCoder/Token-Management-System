@@ -9,7 +9,8 @@ import {
   type Order,
 } from "@/app/components/shared/api";
 
-export default function RunnerDashboard() {
+// Runner handovers: collect from packager, hand to cashier (hand_to_cashier).
+export default function RunnerQueue() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -34,12 +35,8 @@ export default function RunnerDashboard() {
   }, []);
 
   useEffect(() => {
-    const initial = window.setTimeout(() => {
-      void load();
-    }, 0);
-    const id = window.setInterval(() => {
-      void load();
-    }, 4000);
+    const initial = window.setTimeout(() => void load(), 0);
+    const id = window.setInterval(() => void load(), 4000);
     return () => {
       window.clearTimeout(initial);
       window.clearInterval(id);
@@ -113,9 +110,7 @@ export default function RunnerDashboard() {
                 }`}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <p className="font-semibold">
-                    Token #{item.token_number ?? "—"}
-                  </p>
+                  <p className="font-semibold">Token #{item.token_number ?? "—"}</p>
                   <span className="text-xs font-semibold text-zinc-500">
                     {statusLabel(item.status)}
                   </span>
@@ -168,9 +163,7 @@ export default function RunnerDashboard() {
                   >
                     <p className="text-sm text-zinc-800">{line.product_name}</p>
                     <span className="text-xs font-semibold text-zinc-500">
-                      {line.bag_number != null
-                        ? `Bag ${line.bag_number}`
-                        : "No bag"}
+                      {line.bag_number != null ? `Bag ${line.bag_number}` : "No bag"}
                     </span>
                   </div>
                 ))}
