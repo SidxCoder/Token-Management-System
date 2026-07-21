@@ -1,7 +1,7 @@
 "use client";
 
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { ALL_ROLES, ROLE_CONFIG, type UserRole } from "@/app/components/logins";
+import { ALL_ROLES, ROLE_CONFIG, type UserRole } from "@/app/components/login";
 import {
   toApiRole,
   toUserRole,
