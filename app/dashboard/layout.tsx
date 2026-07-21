@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/lib/auth";
-import { ROLE_CONFIG } from "@/app/components/logins";
+import { ROLE_CONFIG } from "@/app/components/login";
 import { toUserRole } from "@/app/components/shared/api";
 import Sidebar from "@/app/components/dashboard/Sidebar";
 import { visibleNav } from "./nav";

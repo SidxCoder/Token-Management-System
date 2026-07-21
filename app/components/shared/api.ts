@@ -1,4 +1,4 @@
-import type { UserRole } from "@/app/components/logins";
+import type { UserRole } from "@/app/components/login";
 
 export type OrderStatus =
   | "PACKAGING_PENDING"
