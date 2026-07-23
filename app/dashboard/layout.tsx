@@ -21,9 +21,9 @@ export default async function DashboardLayout({
   const roleLabel = ROLE_CONFIG[toUserRole(user.role)]?.label ?? user.role;
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-zinc-50 md:flex-row">
+    <div className="flex min-h-screen w-full flex-1 flex-col bg-slate-50 text-slate-700 md:flex-row">
       <Sidebar items={items} displayName={user.display_name} roleLabel={roleLabel} />
-      <main className="min-w-0 flex-1 px-5 py-6 sm:px-8">
+      <main className="min-w-0 flex-1 px-5 py-7 sm:px-8 lg:px-10">
         <div className="mx-auto max-w-6xl">{children}</div>
       </main>
     </div>
