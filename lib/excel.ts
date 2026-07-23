@@ -154,11 +154,9 @@ export function parseOrdersWorkbook(buf: Buffer): { errors: UploadError[]; order
       errors.push({ sheet: "Items", row: rowNum, message: `Order ID "${order_id}" does not exist in the Orders sheet` });
       return;
     }
-    if (parent.items.some((it) => it.sku_code === sku_code)) {
-      errors.push({ sheet: "Items", row: rowNum, message: `Duplicate SKU Code "${sku_code}" for order "${order_id}"` });
-      return;
-    }
 
+    // SKU codes may repeat — the same product can appear more than once on an
+    // order (and across orders), so no per-order SKU uniqueness check.
     parent.items.push({ product_name, sku_code, sku_description, bag_number });
   });
 
