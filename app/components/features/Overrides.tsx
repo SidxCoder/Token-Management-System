@@ -8,6 +8,7 @@ import {
   type Order,
 } from "@/app/components/shared/api";
 import EmptyState from "@/app/components/dashboard/EmptyState";
+import Loader from "@/app/components/dashboard/Loader";
 import {
   BagIcon,
   DocumentSearchIcon,
@@ -177,7 +178,7 @@ export default function Overrides() {
         </p>
       ) : null}
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+      <div className="mt-4 grid items-start gap-4 lg:grid-cols-2">
         <div>
           <label className="mb-3 block text-sm font-medium text-slate-700">
             Search orders
@@ -191,9 +192,7 @@ export default function Overrides() {
 
           <div className="max-h-96 space-y-2 overflow-auto pr-1">
             {loadingOrders ? (
-              <p className="rounded-lg border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-500">
-                Loading orders…
-              </p>
+              <Loader label="Loading orders…" />
             ) : filteredOrders.length ? (
               filteredOrders.map((order) => (
                 <button

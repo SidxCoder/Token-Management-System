@@ -1,7 +1,9 @@
+import { randomUUID } from "crypto";
 import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { parseOrdersWorkbook, type ParsedOrder } from "@/lib/excel";
 import { can } from "@/lib/permissions";
+import { Status } from "@/lib/generated/prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest) {
@@ -68,29 +70,45 @@ export async function POST(req: NextRequest) {
     const fullyBagged = (o: ParsedOrder) =>
       o.items.every((i) => i.bag_number !== null);
 
-    await prisma.$transaction(async (tx) => {
-      for (const o of orders) {
-        await tx.orders.create({
+    // Generate order ids up front so lines can reference them without a
+    // round-trip per order. Two bulk createMany calls keep even large sheets
+    // (200+ orders) well under the interactive-transaction timeout, instead of
+    // one INSERT round-trip per order which previously timed out.
+    const orderData = orders.map((o) => ({
+      id: randomUUID(),
+      order_id: o.order_id,
+      customer_name: o.customer_name,
+      phone: o.phone,
+      status: fullyBagged(o) ? Status.PACKAGED : Status.PACKAGING_PENDING,
+      number_of_items: o.items.length,
+    }));
+    const idByOrderId = new Map(orderData.map((d) => [d.order_id, d.id]));
+    const lineData = orders.flatMap((o) =>
+      o.items.map((it) => ({
+        order_ref_id: idByOrderId.get(o.order_id)!,
+        product_name: it.product_name,
+        sku_code: it.sku_code,
+        sku_description: it.sku_description,
+        bag_number: it.bag_number,
+      })),
+    );
+
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.orders.createMany({ data: orderData });
+        await tx.order_Lines.createMany({ data: lineData });
+        await tx.audit_Log.create({
           data: {
-            order_id: o.order_id,
-            customer_name: o.customer_name,
-            phone: o.phone,
-            status: fullyBagged(o) ? "PACKAGED" : "PACKAGING_PENDING",
-            number_of_items: o.items.length,
-            Order_Lines: { create: o.items },
+            user_id: user.id,
+            username: user.username,
+            role: user.role,
+            action: "upload_orders",
+            details: { orders: orders.length, items: totalItems },
           },
         });
-      }
-      await tx.audit_Log.create({
-        data: {
-          user_id: user.id,
-          username: user.username,
-          role: user.role,
-          action: "upload_orders",
-          details: { orders: orders.length, items: totalItems },
-        },
-      });
-    });
+      },
+      { timeout: 20000 },
+    );
 
     return NextResponse.json({
       orders: orders.length,

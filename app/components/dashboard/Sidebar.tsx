@@ -53,15 +53,16 @@ export default function Sidebar({ items, displayName, roleLabel }: SidebarProps)
 
   return (
     <>
-      {/* Desktop sidebar */}
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-slate-200 bg-white md:flex">
+      {/* Desktop sidebar — pinned to the viewport so it stays in place while the
+          main content scrolls; the nav scrolls internally if it overflows. */}
+      <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col self-start border-r border-slate-200 bg-white md:flex">
         {brand}
         {nav}
         <ProfileFooter displayName={displayName} roleLabel={roleLabel} />
       </aside>
 
       {/* Mobile top bar */}
-      <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 md:hidden">
+      <div className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 md:hidden">
         <div className="flex items-center gap-2">
           <ShieldLock className="h-6 w-6 text-blue-600" />
           <span className="text-sm font-bold uppercase tracking-wider text-blue-600">

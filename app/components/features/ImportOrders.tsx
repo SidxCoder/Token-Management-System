@@ -1,36 +1,29 @@
 "use client";
 
 import { useState } from "react";
+import { uploadOrders, type UploadIssue } from "@/app/components/shared/api";
+import UploadErrorList from "@/app/components/dashboard/UploadErrorList";
 import { CloudUploadIcon, UploadIcon } from "@/app/components/dashboard/icons";
 
 // Excel import, shared by packager and admin (upload_excel permission).
 export default function ImportOrders() {
   const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [issues, setIssues] = useState<UploadIssue[]>([]);
   const [message, setMessage] = useState<string | null>(null);
 
-  async function uploadExcel(file: File) {
+  async function handleFile(file: File) {
     setUploading(true);
-    setError(null);
+    setIssues([]);
     setMessage(null);
-    try {
-      const body = new FormData();
-      body.append("file", file);
-      const res = await fetch("/api/orders/upload", { method: "POST", body });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const msg =
-          Array.isArray(data.errors) && data.errors[0]?.message
-            ? data.errors[0].message
-            : (data.error ?? "Upload failed");
-        throw new Error(msg);
-      }
-      setMessage("Orders imported successfully.");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Upload failed");
-    } finally {
-      setUploading(false);
+    const result = await uploadOrders(file);
+    if (result.ok) {
+      setMessage(
+        `Imported ${result.orders} order${result.orders === 1 ? "" : "s"} (${result.items} item${result.items === 1 ? "" : "s"}).`,
+      );
+    } else {
+      setIssues(result.errors);
     }
+    setUploading(false);
   }
 
   return (
@@ -57,17 +50,17 @@ export default function ImportOrders() {
             disabled={uploading}
             onChange={(event) => {
               const file = event.target.files?.[0];
-              if (file) void uploadExcel(file);
+              if (file) void handleFile(file);
               event.target.value = "";
             }}
           />
         </label>
       </div>
 
-      {error ? (
-        <p className="mt-4 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </p>
+      {issues.length ? (
+        <div className="mt-4">
+          <UploadErrorList issues={issues} />
+        </div>
       ) : null}
       {message ? (
         <p className="mt-4 rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">

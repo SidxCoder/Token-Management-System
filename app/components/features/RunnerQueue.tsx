@@ -9,6 +9,7 @@ import {
   type Order,
 } from "@/app/components/shared/api";
 import EmptyState from "@/app/components/dashboard/EmptyState";
+import Loader from "@/app/components/dashboard/Loader";
 import {
   BagIcon,
   ClipboardListIcon,
@@ -22,6 +23,7 @@ export default function RunnerQueue() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -38,6 +40,8 @@ export default function RunnerQueue() {
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load orders");
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -101,13 +105,15 @@ export default function RunnerQueue() {
         </p>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid items-start gap-6 lg:grid-cols-2">
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-base font-semibold text-slate-900">Assigned tokens</h2>
           <p className="mt-1 text-sm text-slate-500">
             Collect from packager, then hand to cashier.
           </p>
-          {orders.length === 0 ? (
+          {!loaded ? (
+            <Loader label="Loading tokens…" />
+          ) : orders.length === 0 ? (
             <EmptyState
               icon={<ClipboardListIcon className="h-9 w-9" />}
               title="No tokens waiting for runner."

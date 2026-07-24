@@ -8,6 +8,7 @@ import {
   type Order,
 } from "@/app/components/shared/api";
 import EmptyState from "@/app/components/dashboard/EmptyState";
+import Loader from "@/app/components/dashboard/Loader";
 import {
   ClipboardIcon,
   DocumentSearchIcon,
@@ -60,7 +61,7 @@ export default function OrdersBrowser() {
     <div className="space-y-6">
       {error ? <ErrorBanner message={error} /> : null}
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid items-start gap-6 lg:grid-cols-2">
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-base font-semibold text-slate-900">Search orders</h2>
           <div className="relative mt-4">
@@ -76,10 +77,7 @@ export default function OrdersBrowser() {
           </div>
 
           {loading ? (
-            <EmptyState
-              icon={<DocumentSearchIcon className="h-9 w-9" />}
-              title="Loading orders…"
-            />
+            <Loader label="Loading orders…" />
           ) : results.length ? (
             <div className="mt-5 space-y-3">
               {results.map((order) => (

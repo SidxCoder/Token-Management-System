@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { statusLabel, type OrderStatus } from "@/app/components/shared/api";
 import EmptyState from "@/app/components/dashboard/EmptyState";
+import Loader from "@/app/components/dashboard/Loader";
 import {
   CancelIcon,
   ClipboardChartIcon,
@@ -19,6 +20,7 @@ type Reports = {
 // Daily stats and status breakdown (view_reports permission).
 export default function ReportsPanel() {
   const [reports, setReports] = useState<Reports | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -31,6 +33,8 @@ export default function ReportsPanel() {
         if (!cancelled) setReports(data as Reports);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load reports");
+      } finally {
+        if (!cancelled) setLoaded(true);
       }
     }
     void load();
@@ -74,7 +78,9 @@ export default function ReportsPanel() {
         <p className="mt-1 text-sm text-slate-500">
           Live count of every order grouped by its current status.
         </p>
-        {Object.keys(byStatus).length ? (
+        {!loaded ? (
+          <Loader label="Loading reports…" />
+        ) : Object.keys(byStatus).length ? (
           <div className="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-200">
             {Object.entries(byStatus).map(([status, count]) => (
               <div key={status} className="flex items-center justify-between px-4 py-3">

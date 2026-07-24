@@ -8,6 +8,7 @@ import {
   type Order,
 } from "@/app/components/shared/api";
 import EmptyState from "@/app/components/dashboard/EmptyState";
+import Loader from "@/app/components/dashboard/Loader";
 import {
   ClipboardListIcon,
   DocumentSearchIcon,
@@ -23,6 +24,7 @@ export default function TokenDesk() {
   const [view, setView] = useState<"search" | "issued">("search");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -31,6 +33,8 @@ export default function TokenDesk() {
       setOrders(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load orders");
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -83,7 +87,7 @@ export default function TokenDesk() {
 
   return (
     <div className="space-y-6">
-      {orders.length === 0 ? (
+      {loaded && orders.length === 0 ? (
         <section className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-600">
             <InfoIcon className="h-6 w-6" />
@@ -117,7 +121,7 @@ export default function TokenDesk() {
       </div>
 
       {view === "search" ? (
-        <div className="grid gap-6 lg:grid-cols-2">
+        <div className="grid items-start gap-6 lg:grid-cols-2">
           <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="text-base font-semibold text-slate-900">Search order</h2>
             <div className="relative mt-4">
@@ -131,7 +135,9 @@ export default function TokenDesk() {
                 className="w-full rounded-lg border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               />
             </div>
-            {results.length ? (
+            {!loaded ? (
+              <Loader label="Loading orders…" />
+            ) : results.length ? (
               <div className="mt-5 space-y-3">
                 {results.map((order) => (
                   <button

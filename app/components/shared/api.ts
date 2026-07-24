@@ -73,6 +73,34 @@ export async function orderAction(
   return data;
 }
 
+export type UploadIssue = { sheet: string; row: number; message: string };
+
+export type UploadResult =
+  | { ok: true; orders: number; items: number; prePacked: number }
+  | { ok: false; errors: UploadIssue[] };
+
+// Upload the orders workbook. The API returns every validation error at once
+// (import is all-or-nothing), so this surfaces the full list, falling back to a
+// single synthetic issue for non-validation failures (e.g. network/500).
+export async function uploadOrders(file: File): Promise<UploadResult> {
+  const body = new FormData();
+  body.append("file", file);
+  let res: Response;
+  try {
+    res = await fetch("/api/orders/upload", { method: "POST", body });
+  } catch {
+    return { ok: false, errors: [{ sheet: "-", row: 0, message: "Network error — could not reach the server" }] };
+  }
+  const data = await res.json().catch(() => ({}));
+  if (res.ok) {
+    return { ok: true, orders: data.orders ?? 0, items: data.items ?? 0, prePacked: data.prePacked ?? 0 };
+  }
+  const errors: UploadIssue[] = Array.isArray(data.errors) && data.errors.length
+    ? (data.errors as UploadIssue[])
+    : [{ sheet: "-", row: 0, message: data.error ?? "Upload failed" }];
+  return { ok: false, errors };
+}
+
 export function statusLabel(status: OrderStatus) {
   return status
     .toLowerCase()

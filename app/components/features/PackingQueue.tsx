@@ -6,9 +6,13 @@ import {
   fetchOrders,
   orderAction,
   statusLabel,
+  uploadOrders,
   type Order,
+  type UploadIssue,
 } from "@/app/components/shared/api";
 import EmptyState from "@/app/components/dashboard/EmptyState";
+import Loader from "@/app/components/dashboard/Loader";
+import UploadErrorList from "@/app/components/dashboard/UploadErrorList";
 import {
   BoxOpenIcon,
   ClipboardIcon,
@@ -25,7 +29,9 @@ export default function PackingQueue() {
   const [bagDrafts, setBagDrafts] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadIssues, setUploadIssues] = useState<UploadIssue[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -43,6 +49,8 @@ export default function PackingQueue() {
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load orders");
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -69,24 +77,14 @@ export default function PackingQueue() {
   async function uploadExcel(file: File) {
     setUploading(true);
     setError(null);
-    try {
-      const body = new FormData();
-      body.append("file", file);
-      const res = await fetch("/api/orders/upload", { method: "POST", body });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const msg =
-          Array.isArray(data.errors) && data.errors[0]?.message
-            ? data.errors[0].message
-            : (data.error ?? "Upload failed");
-        throw new Error(msg);
-      }
+    setUploadIssues([]);
+    const result = await uploadOrders(file);
+    if (result.ok) {
       await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Upload failed");
-    } finally {
-      setUploading(false);
+    } else {
+      setUploadIssues(result.errors);
     }
+    setUploading(false);
   }
 
   async function assignBag(lineId: string) {
@@ -154,13 +152,17 @@ export default function PackingQueue() {
         </p>
       ) : null}
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      {uploadIssues.length ? <UploadErrorList issues={uploadIssues} /> : null}
+
+      <div className="grid items-start gap-6 lg:grid-cols-2">
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <h2 className="text-base font-semibold text-slate-900">Bag queue</h2>
           <p className="mt-1 text-sm text-slate-500">
             Assign bag numbers, then hand over after token is issued.
           </p>
-          {orders.length === 0 ? (
+          {!loaded ? (
+            <Loader label="Loading orders…" />
+          ) : orders.length === 0 ? (
             <EmptyState
               icon={<BoxOpenIcon className="h-9 w-9" />}
               title="No packing orders."

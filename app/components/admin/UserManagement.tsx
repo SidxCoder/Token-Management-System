@@ -8,6 +8,7 @@ import {
   type ApiUser,
 } from "@/app/components/shared/api";
 import { AuditIcon, RunnerIcon, UsersIcon } from "@/app/components/dashboard/icons";
+import Loader from "@/app/components/dashboard/Loader";
 
 type UiUser = {
   id: string;
@@ -327,8 +328,8 @@ export default function UserManagement() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="px-5 py-10 text-center text-slate-500">
-                    Loading users…
+                  <td colSpan={5} className="px-5 py-6">
+                    <Loader label="Loading users…" />
                   </td>
                 </tr>
               ) : (

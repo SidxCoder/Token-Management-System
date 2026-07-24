@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import EmptyState from "@/app/components/dashboard/EmptyState";
+import Loader from "@/app/components/dashboard/Loader";
 import { DocumentIcon } from "@/app/components/dashboard/icons";
 
 type AuditEntry = {
@@ -131,8 +132,8 @@ export default function AuditLog() {
           <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={6} className="px-5 py-10 text-center text-slate-500">
-                  Loading…
+                <td colSpan={6} className="px-5 py-6">
+                  <Loader />
                 </td>
               </tr>
             ) : entries.length ? (
