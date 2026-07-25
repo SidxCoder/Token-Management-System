@@ -7,6 +7,13 @@ import {
   statusLabel,
   type Order,
 } from "@/app/components/shared/api";
+import EmptyState from "@/app/components/dashboard/EmptyState";
+import Loader from "@/app/components/dashboard/Loader";
+import {
+  ClipboardIcon,
+  DocumentSearchIcon,
+  SearchIcon,
+} from "@/app/components/dashboard/icons";
 
 // Read-only order search available to every role (search_orders permission).
 export default function OrdersBrowser() {
@@ -52,65 +59,70 @@ export default function OrdersBrowser() {
 
   return (
     <div className="space-y-6">
-      {error ? (
-        <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
-      ) : null}
+      {error ? <ErrorBanner message={error} /> : null}
 
-      <div className="grid gap-6 lg:grid-cols-[1.4fr_0.9fr]">
-        <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6">
-          <label className="block">
-            <span className="text-sm font-semibold text-zinc-800">Search orders</span>
+      <div className="grid items-start gap-6 lg:grid-cols-2">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <h2 className="text-base font-semibold text-slate-900">Search orders</h2>
+          <div className="relative mt-4">
+            <span className="pointer-events-none absolute inset-y-0 left-0 grid w-11 place-items-center text-slate-400">
+              <SearchIcon className="h-5 w-5" />
+            </span>
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Order id, customer, phone, or status"
-              className="mt-2 w-full rounded-xl border border-zinc-300 px-4 py-3 text-sm outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-200"
+              className="w-full rounded-lg border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
-          </label>
-          <div className="mt-5 space-y-3">
-            {loading ? (
-              <p className="py-8 text-center text-sm text-zinc-500">Loading orders…</p>
-            ) : results.length ? (
-              results.map((order) => (
+          </div>
+
+          {loading ? (
+            <Loader label="Loading orders…" />
+          ) : results.length ? (
+            <div className="mt-5 space-y-3">
+              {results.map((order) => (
                 <button
                   key={order.order_id}
                   onClick={() => setSelectedId(order.order_id)}
-                  className={`flex w-full items-center justify-between rounded-xl border p-4 text-left ${
+                  className={`flex w-full items-center justify-between rounded-xl border p-4 text-left transition ${
                     selectedId === order.order_id
-                      ? "border-zinc-900 bg-zinc-50"
-                      : "border-zinc-200 hover:border-zinc-400"
+                      ? "border-blue-500 bg-blue-50"
+                      : "border-slate-200 hover:border-slate-300"
                   }`}
                 >
                   <div>
-                    <p className="font-semibold text-zinc-900">{order.order_id}</p>
-                    <p className="mt-1 text-sm text-zinc-500">
+                    <p className="font-semibold text-slate-900">{order.order_id}</p>
+                    <p className="mt-1 text-sm text-slate-500">
                       {order.customer_name} · {order.phone}
                     </p>
                   </div>
                   <StatusBadge status={order.status} />
                 </button>
-              ))
-            ) : (
-              <p className="py-8 text-center text-sm text-zinc-500">
-                No order matched your search.
-              </p>
-            )}
-          </div>
-        </section>
-
-        <aside className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-          {!selected ? (
-            <div className="grid min-h-56 place-items-center text-center">
-              <p className="text-sm text-zinc-500">Select an order to view details.</p>
+              ))}
             </div>
           ) : (
+            <EmptyState
+              icon={<DocumentSearchIcon className="h-9 w-9" />}
+              title="No order matched your search."
+              subtitle="Try searching with a different keyword."
+            />
+          )}
+        </section>
+
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          {!selected ? (
+            <EmptyState
+              icon={<ClipboardIcon className="h-9 w-9" />}
+              title="Select an order to view details."
+              subtitle="Order information and timeline will appear here."
+              full
+            />
+          ) : (
             <>
-              <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
                 Order details
               </p>
-              <h3 className="mt-2 text-xl font-bold text-zinc-900">
-                {selected.order_id}
-              </h3>
+              <h3 className="mt-2 text-xl font-bold text-slate-900">{selected.order_id}</h3>
               <dl className="mt-6 space-y-3 text-sm">
                 <Row label="Customer" value={selected.customer_name} />
                 <Row label="Phone" value={selected.phone} />
@@ -125,14 +137,14 @@ export default function OrdersBrowser() {
                 />
               </dl>
 
-              <div className="mt-5 divide-y divide-zinc-100 rounded-xl border border-zinc-200">
+              <div className="mt-5 divide-y divide-slate-100 rounded-xl border border-slate-200">
                 {selected.Order_Lines.map((line) => (
                   <div
                     key={line.id}
                     className="flex items-center justify-between gap-3 p-3.5"
                   >
-                    <p className="text-sm text-zinc-800">{line.product_name}</p>
-                    <span className="text-xs font-semibold text-zinc-500">
+                    <p className="text-sm text-slate-700">{line.product_name}</p>
+                    <span className="text-xs font-semibold text-slate-500">
                       {line.bag_number != null ? `Bag ${line.bag_number}` : "—"}
                     </span>
                   </div>
@@ -140,7 +152,7 @@ export default function OrdersBrowser() {
               </div>
             </>
           )}
-        </aside>
+        </section>
       </div>
     </div>
   );
@@ -149,16 +161,24 @@ export default function OrdersBrowser() {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between gap-4">
-      <dt className="text-zinc-500">{label}</dt>
-      <dd className="font-semibold text-zinc-800">{value}</dd>
+      <dt className="text-slate-500">{label}</dt>
+      <dd className="font-semibold text-slate-800">{value}</dd>
     </div>
   );
 }
 
 function StatusBadge({ status }: { status: Order["status"] }) {
   return (
-    <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700">
+    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
       {statusLabel(status)}
     </span>
+  );
+}
+
+function ErrorBanner({ message }: { message: string }) {
+  return (
+    <p className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+      {message}
+    </p>
   );
 }

@@ -13,6 +13,7 @@ export type NavItem = {
 
 export const NAV_ITEMS: NavItem[] = [
   { slug: "orders", label: "Orders", description: "Search and browse every order", action: "search_orders" },
+  { slug: "new-order", label: "New Order", description: "Manually add a single order", action: "create_order" },
   { slug: "import", label: "Import", description: "Upload the orders Excel sheet", action: "upload_excel" },
   { slug: "packing", label: "Packing", description: "Assign bags and hand to runner", action: "set_bag_number" },
   { slug: "tokens", label: "Tokens", description: "Issue collection tokens", action: "issue_token" },

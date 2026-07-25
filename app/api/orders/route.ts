@@ -2,6 +2,7 @@ import { getSessionUser } from "@/lib/auth"
 import { prisma } from "@/lib/db";
 import { Status } from "@/lib/generated/prisma/enums";
 import { can } from "@/lib/permissions";
+import { createOrder, WorkflowError } from "@/lib/orders";
 import { NextRequest, NextResponse } from "next/server";
 
 const PAGE_SIZE = 100
@@ -71,4 +72,20 @@ export async function GET(req: NextRequest) {
         total,
         totalPages: Math.ceil(total / PAGE_SIZE)
     })
+}
+
+export async function POST(req: NextRequest) {
+    const user = await getSessionUser();
+    if (!user) return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
+
+    try {
+        const body = await req.json().catch(() => ({}));
+        const order = await createOrder(user, body);
+        return NextResponse.json(order, { status: 201 });
+    } catch (e) {
+        if (e instanceof WorkflowError) {
+            return NextResponse.json({ error: e.message }, { status: e.status });
+        }
+        throw e;
+    }
 }

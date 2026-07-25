@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import EmptyState from "@/app/components/dashboard/EmptyState";
+import Loader from "@/app/components/dashboard/Loader";
+import { DocumentIcon } from "@/app/components/dashboard/icons";
 
 type AuditEntry = {
   id: string;
@@ -71,7 +74,7 @@ export default function AuditLog() {
     <div className="space-y-6">
       <form
         onSubmit={applyFilters}
-        className="grid gap-3 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm sm:grid-cols-4"
+        className="grid gap-3 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:grid-cols-4"
       >
         <Field
           label="Action"
@@ -94,14 +97,14 @@ export default function AuditLog() {
         <div className="flex items-end gap-2">
           <button
             type="submit"
-            className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-zinc-800"
+            className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700"
           >
             Filter
           </button>
           <button
             type="button"
             onClick={clearFilters}
-            className="rounded-lg border border-zinc-200 px-4 py-2.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100"
+            className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
           >
             Clear
           </button>
@@ -109,12 +112,14 @@ export default function AuditLog() {
       </form>
 
       {error ? (
-        <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>
+        <p className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {error}
+        </p>
       ) : null}
 
-      <div className="overflow-x-auto rounded-2xl border border-zinc-200 bg-white shadow-sm">
+      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
         <table className="min-w-[760px] w-full text-left text-sm">
-          <thead className="bg-zinc-50 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+          <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500">
             <tr>
               <th className="px-5 py-3.5">Time</th>
               <th className="px-5 py-3.5">User</th>
@@ -124,30 +129,30 @@ export default function AuditLog() {
               <th className="px-5 py-3.5">Details</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-100">
+          <tbody className="divide-y divide-slate-100">
             {loading ? (
               <tr>
-                <td colSpan={6} className="px-5 py-10 text-center text-zinc-500">
-                  Loading…
+                <td colSpan={6} className="px-5 py-6">
+                  <Loader />
                 </td>
               </tr>
             ) : entries.length ? (
               entries.map((entry) => (
                 <tr key={entry.id} className="align-top">
-                  <td className="whitespace-nowrap px-5 py-4 text-zinc-600">
+                  <td className="whitespace-nowrap px-5 py-4 text-slate-500">
                     {new Date(entry.at).toLocaleString("en-IN")}
                   </td>
-                  <td className="px-5 py-4 font-medium text-zinc-800">{entry.username}</td>
-                  <td className="px-5 py-4 text-zinc-600">{entry.role}</td>
+                  <td className="px-5 py-4 font-medium text-slate-700">{entry.username}</td>
+                  <td className="px-5 py-4 text-slate-500">{entry.role}</td>
                   <td className="px-5 py-4">
-                    <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700">
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
                       {entry.action}
                     </span>
                   </td>
-                  <td className="px-5 py-4 font-mono text-xs text-zinc-600">
+                  <td className="px-5 py-4 font-mono text-xs text-slate-500">
                     {entry.order_ref?.order_id ?? "—"}
                   </td>
-                  <td className="max-w-xs px-5 py-4 text-xs text-zinc-500">
+                  <td className="max-w-xs px-5 py-4 text-xs text-slate-500">
                     {entry.details != null ? (
                       <code className="block whitespace-pre-wrap break-words">
                         {JSON.stringify(entry.details)}
@@ -160,8 +165,12 @@ export default function AuditLog() {
               ))
             ) : (
               <tr>
-                <td colSpan={6} className="px-5 py-10 text-center text-zinc-500">
-                  No audit entries found.
+                <td colSpan={6} className="px-5 py-6">
+                  <EmptyState
+                    icon={<DocumentIcon className="h-9 w-9" />}
+                    title="No audit entries found."
+                    subtitle="Try adjusting your filters or check back later."
+                  />
                 </td>
               </tr>
             )}
@@ -169,7 +178,7 @@ export default function AuditLog() {
         </table>
       </div>
 
-      <div className="flex items-center justify-between text-sm text-zinc-600">
+      <div className="flex items-center justify-between text-sm text-slate-500">
         <p>
           {total} entr{total === 1 ? "y" : "ies"}
           {totalPages > 0 ? ` · page ${page} of ${totalPages}` : ""}
@@ -179,7 +188,7 @@ export default function AuditLog() {
             type="button"
             disabled={page <= 1 || loading}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
-            className="rounded-lg border border-zinc-200 px-3 py-2 font-medium disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg border border-slate-200 px-3 py-2 font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Previous
           </button>
@@ -187,7 +196,7 @@ export default function AuditLog() {
             type="button"
             disabled={page >= totalPages || loading}
             onClick={() => setPage((p) => p + 1)}
-            className="rounded-lg border border-zinc-200 px-3 py-2 font-medium disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg border border-slate-200 px-3 py-2 font-medium text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Next
           </button>
@@ -209,13 +218,13 @@ function Field({
   placeholder: string;
 }) {
   return (
-    <label className="block text-sm font-medium text-zinc-700">
+    <label className="block text-sm font-medium text-slate-700">
       {label}
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="mt-1.5 w-full rounded-lg border border-zinc-200 px-3 py-2.5 text-sm font-normal outline-none focus:border-zinc-900 focus:ring-2 focus:ring-zinc-200"
+        className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
       />
     </label>
   );

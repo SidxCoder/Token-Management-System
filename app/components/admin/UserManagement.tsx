@@ -7,6 +7,8 @@ import {
   toUserRole,
   type ApiUser,
 } from "@/app/components/shared/api";
+import { AuditIcon, RunnerIcon, UsersIcon } from "@/app/components/dashboard/icons";
+import Loader from "@/app/components/dashboard/Loader";
 
 type UiUser = {
   id: string;
@@ -196,29 +198,38 @@ export default function UserManagement() {
         </div>
         <button
           onClick={openCreate}
-          className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700"
+          className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
         >
           <span className="text-lg leading-none">+</span> Add user
         </button>
       </div>
 
       <div className="grid gap-3 border-b border-slate-100 bg-slate-50/70 px-5 py-4 sm:grid-cols-3 sm:px-7">
-        <Summary label="Total users" value={users.length} />
         <Summary
-          label="Active users"
-          value={activeUsers}
-          tone="text-emerald-600"
+          icon={<UsersIcon className="h-6 w-6" />}
+          iconTone="bg-blue-50 text-blue-600"
+          label="Total users"
+          value={users.length}
         />
         <Summary
+          icon={<RunnerIcon className="h-6 w-6" />}
+          iconTone="bg-emerald-50 text-emerald-600"
+          label="Active users"
+          value={activeUsers}
+          valueTone="text-emerald-600"
+        />
+        <Summary
+          icon={<AuditIcon className="h-6 w-6" />}
+          iconTone="bg-violet-50 text-violet-600"
           label="Roles available"
           value={ALL_ROLES.length}
-          tone="text-indigo-600"
+          valueTone="text-violet-600"
         />
       </div>
 
       <div className="p-5 sm:p-7">
         {error ? (
-          <p className="mb-4 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+          <p className="mb-4 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
           </p>
         ) : null}
@@ -232,14 +243,14 @@ export default function UserManagement() {
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search by name, username, or role"
-            className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+            className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
           />
         </label>
 
         {showForm ? (
           <form
             onSubmit={saveUser}
-            className="mb-6 rounded-xl border border-indigo-100 bg-indigo-50/50 p-5"
+            className="mb-6 rounded-xl border border-blue-100 bg-blue-50/50 p-5"
           >
             <div className="mb-4 flex items-center justify-between">
               <h3 className="font-semibold text-slate-900">
@@ -269,9 +280,7 @@ export default function UserManagement() {
                 />
               ) : null}
               <PasswordInput
-                label={
-                  editingId ? "New password (leave blank to keep)" : "Password"
-                }
+                label={editingId ? "New password (leave blank to keep)" : "Password"}
                 value={form.password}
                 onChange={(password) => setForm({ ...form, password })}
                 visible={showFormPassword}
@@ -283,12 +292,9 @@ export default function UserManagement() {
                 <select
                   value={form.role}
                   onChange={(event) =>
-                    setForm({
-                      ...form,
-                      role: event.target.value as UserRole,
-                    })
+                    setForm({ ...form, role: event.target.value as UserRole })
                   }
-                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 font-normal text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 font-normal text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
                 >
                   {ALL_ROLES.map((role) => (
                     <option key={role} value={role}>
@@ -301,13 +307,9 @@ export default function UserManagement() {
             <button
               type="submit"
               disabled={saving}
-              className="mt-5 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
+              className="mt-5 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
             >
-              {saving
-                ? "Saving…"
-                : editingId
-                  ? "Save changes"
-                  : "Create user"}
+              {saving ? "Saving…" : editingId ? "Save changes" : "Create user"}
             </button>
           </form>
         ) : null}
@@ -326,8 +328,8 @@ export default function UserManagement() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="px-5 py-10 text-center text-slate-500">
-                    Loading users…
+                  <td colSpan={5} className="px-5 py-6">
+                    <Loader label="Loading users…" />
                   </td>
                 </tr>
               ) : (
@@ -335,7 +337,7 @@ export default function UserManagement() {
                   <tr key={user.id} className="transition hover:bg-slate-50/80">
                     <td className="px-5 py-4">
                       <div className="flex items-center gap-3">
-                        <span className="grid h-9 w-9 place-items-center rounded-full bg-indigo-100 text-xs font-bold text-indigo-700">
+                        <span className="grid h-9 w-9 place-items-center rounded-full bg-blue-100 text-xs font-bold text-blue-700">
                           {initialsFor(user.display_name)}
                         </span>
                         <p className="font-semibold text-slate-800">
@@ -356,7 +358,7 @@ export default function UserManagement() {
                         className={`rounded-full px-3 py-1.5 text-xs font-semibold ring-1 ring-inset outline-none ${roleStyles[user.role]}`}
                       >
                         {ALL_ROLES.map((role) => (
-                          <option key={role} value={role}>
+                          <option key={role} value={role} className="bg-white text-slate-900">
                             {ROLE_CONFIG[role].label}
                           </option>
                         ))}
@@ -377,7 +379,7 @@ export default function UserManagement() {
                       <div className="flex justify-end">
                         <button
                           onClick={() => openEdit(user)}
-                          className="font-semibold text-indigo-600 hover:text-indigo-800"
+                          className="font-semibold text-blue-600 hover:text-blue-800"
                         >
                           Edit
                         </button>
@@ -388,10 +390,7 @@ export default function UserManagement() {
               )}
               {!loading && filteredUsers.length === 0 && (
                 <tr>
-                  <td
-                    colSpan={5}
-                    className="px-5 py-10 text-center text-slate-500"
-                  >
+                  <td colSpan={5} className="px-5 py-10 text-center text-slate-500">
                     No matching users found.
                   </td>
                 </tr>
@@ -405,18 +404,27 @@ export default function UserManagement() {
 }
 
 function Summary({
+  icon,
+  iconTone,
   label,
   value,
-  tone = "text-slate-900",
+  valueTone = "text-slate-900",
 }: {
+  icon: React.ReactNode;
+  iconTone: string;
   label: string;
   value: number;
-  tone?: string;
+  valueTone?: string;
 }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
-      <p className="text-xs font-medium text-slate-500">{label}</p>
-      <p className={`mt-1 text-xl font-bold ${tone}`}>{value}</p>
+    <div className="flex items-center gap-4 rounded-xl border border-slate-200 bg-white px-5 py-4">
+      <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${iconTone}`}>
+        {icon}
+      </span>
+      <div>
+        <p className="text-sm text-slate-500">{label}</p>
+        <p className={`mt-0.5 text-2xl font-bold ${valueTone}`}>{value}</p>
+      </div>
     </div>
   );
 }
@@ -440,7 +448,7 @@ function Input({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
-        className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+        className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
       />
     </label>
   );
@@ -471,12 +479,12 @@ function PasswordInput({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           placeholder="Set a sign-in password"
-          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 pr-14 font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+          className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 pr-14 font-normal text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
         />
         <button
           type="button"
           onClick={onToggle}
-          className="absolute inset-y-0 right-2 px-2 text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+          className="absolute inset-y-0 right-2 px-2 text-xs font-semibold text-blue-600 hover:text-blue-800"
         >
           {visible ? "Hide" : "Show"}
         </button>
