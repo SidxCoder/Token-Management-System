@@ -4,6 +4,7 @@ import { Role } from "./generated/prisma/client";
 // Every mutating API route must check `can(user.role, action)` before acting.
 export const PERMISSIONS = {
   upload_excel: [Role.PACKAGER, Role.ADMIN],
+  create_order: [Role.ADMIN],
   toggle_line: [Role.PACKAGER, Role.ADMIN],
   mark_all_packed: [Role.PACKAGER, Role.ADMIN],
   set_bag_number: [Role.PACKAGER, Role.ADMIN],

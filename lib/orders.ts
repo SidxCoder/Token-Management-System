@@ -31,6 +31,93 @@ function logAction(tx:Tx, user: Actor, action: string, orderRefId: string | null
     });
 }
 
+export type NewOrderLineInput = {
+    product_name?: string;
+    sku_code?: string | null;
+    sku_description?: string | null;
+    bag_number?: number | string | null;
+};
+export type NewOrderInput = {
+    order_id?: string;
+    customer_name?: string;
+    phone?: string;
+    items?: NewOrderLineInput[];
+};
+
+// Manually create a single order (admin-only). Mirrors the Excel import's rules
+// so a hand-entered order behaves identically: unique order id, 7-15 digit
+// phone, >=1 item, bag numbers free of conflicts with undelivered orders, and
+// status derived from whether every line is bagged.
+export async function createOrder(user: Actor, input: NewOrderInput) {
+    if (!can(user.role, "create_order")) throw new WorkflowError(403, "forbidden");
+
+    const order_id = (input.order_id ?? "").trim();
+    const customer_name = (input.customer_name ?? "").trim();
+    const phone = (input.phone ?? "").trim();
+    const items = Array.isArray(input.items) ? input.items : [];
+
+    if (!order_id) throw new WorkflowError(400, "Order ID is required");
+    if (!customer_name) throw new WorkflowError(400, "Customer name is required");
+    if (!/^\d{7,15}$/.test(phone)) throw new WorkflowError(400, "Phone number must be 7-15 digits");
+    if (items.length === 0) throw new WorkflowError(400, "Add at least one item");
+
+    const lines = items.map((it, i) => {
+        const product_name = (it.product_name ?? "").trim();
+        if (!product_name) throw new WorkflowError(400, `Item ${i + 1}: product name is required`);
+
+        let bag_number: number | null = null;
+        const rawBag = it.bag_number;
+        if (rawBag !== null && rawBag !== undefined && String(rawBag).trim() !== "") {
+            const n = Number(rawBag);
+            if (!Number.isInteger(n) || n < 1) {
+                throw new WorkflowError(400, `Item ${i + 1}: bag number must be a positive whole number`);
+            }
+            bag_number = n;
+        }
+
+        return {
+            product_name,
+            sku_code: (it.sku_code ?? "").toString().trim() || null,
+            sku_description: (it.sku_description ?? "").toString().trim() || null,
+            bag_number,
+        };
+    });
+
+    const existing = await prisma.orders.findUnique({ where: { order_id }, select: { id: true } });
+    if (existing) throw new WorkflowError(409, `Order ID "${order_id}" already exists`);
+
+    // A bag may repeat within this order, but never one that an undelivered
+    // order already holds (delivered orders release theirs).
+    const bags = lines.map((l) => l.bag_number).filter((n): n is number => n !== null);
+    if (bags.length) {
+        const clash = await prisma.order_Lines.findFirst({
+            where: { bag_number: { in: bags }, order_ref: { status: { not: "DELIVERED" } } },
+            include: { order_ref: { select: { order_id: true } } },
+        });
+        if (clash) {
+            throw new WorkflowError(409, `Bag ${clash.bag_number} is already in use by order "${clash.order_ref.order_id}"`);
+        }
+    }
+
+    const status = lines.every((l) => l.bag_number !== null) ? Status.PACKAGED : Status.PACKAGING_PENDING;
+
+    return prisma.$transaction(async (tx) => {
+        const created = await tx.orders.create({
+            data: {
+                order_id,
+                customer_name,
+                phone,
+                status,
+                number_of_items: lines.length,
+                Order_Lines: { create: lines },
+            },
+            include: { Order_Lines: true },
+        });
+        await logAction(tx, user, "create_order", created.id, { items: lines.length, source: "manual" });
+        return created;
+    });
+}
+
 export async function issueToken(user: Actor, orderId: string){
     if(!can(user.role, "issue_token")) throw new WorkflowError(403, "forbidden");
 

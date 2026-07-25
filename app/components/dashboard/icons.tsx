@@ -249,9 +249,18 @@ export const InfoIcon = make(
   </>,
 );
 
+export const FilePlusIcon = make(
+  <>
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+    <path d="M13 3v5h5" />
+    <path d="M12 12.5v5M9.5 15h5" />
+  </>,
+);
+
 // slug -> nav icon, used by the sidebar
 export const NAV_ICONS: Record<string, Icon> = {
   orders: OrdersIcon,
+  "new-order": FilePlusIcon,
   import: ImportIcon,
   packing: PackingIcon,
   tokens: TokensIcon,

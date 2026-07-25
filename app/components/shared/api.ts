@@ -73,6 +73,31 @@ export async function orderAction(
   return data;
 }
 
+export type NewOrderLine = {
+  product_name: string;
+  sku_code?: string;
+  sku_description?: string;
+  bag_number?: string;
+};
+
+export type NewOrderInput = {
+  order_id: string;
+  customer_name: string;
+  phone: string;
+  items: NewOrderLine[];
+};
+
+export async function createOrder(input: NewOrderInput): Promise<Order> {
+  const res = await fetch("/api/orders", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error ?? "Failed to create order");
+  return data as Order;
+}
+
 export type UploadIssue = { sheet: string; row: number; message: string };
 
 export type UploadResult =
