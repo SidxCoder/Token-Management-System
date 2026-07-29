@@ -1,19 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   fetchOrders,
   orderAction,
   statusLabel,
+  statusFirst,
+  statusSorts,
+  UNDELIVERED_STATUSES,
+  PAGE_STEP,
   type Order,
+  type SortKey,
 } from "@/app/components/shared/api";
+import { useDebounced } from "@/app/components/shared/useDebounced";
+import { useInfiniteScroll } from "@/app/components/shared/useInfiniteScroll";
 import EmptyState from "@/app/components/dashboard/EmptyState";
 import Loader from "@/app/components/dashboard/Loader";
+import SortSelect from "@/app/components/dashboard/SortSelect";
 import {
   BagIcon,
   DocumentSearchIcon,
   OverridesIcon,
 } from "@/app/components/dashboard/icons";
+
+const SORT_OPTIONS: SortKey[] = [...statusSorts(UNDELIVERED_STATUSES), "name"];
 
 // Admin overrides: edit any bag number (assigned or not) and force an order to
 // READY_FOR_PICKUP, skipping the runner step. Bag edits use set_bag_number,
@@ -29,22 +39,46 @@ export default function Overrides() {
   const [lineBusy, setLineBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [sort, setSort] = useState<SortKey>(statusFirst("PACKAGING_PENDING"));
+  const [limit, setLimit] = useState(PAGE_STEP);
+  const [total, setTotal] = useState(0);
+
+  const term = useDebounced(search);
+
+  // A new search or sort means a different result set, so the window resets
+  // here rather than in an effect — that avoids a cascading render and a wasted
+  // fetch at the old limit before the reset lands.
+  function changeSearch(next: string) {
+    setSearch(next);
+    setLimit(PAGE_STEP);
+  }
+
+  function changeSort(next: SortKey) {
+    setSort(next);
+    setLimit(PAGE_STEP);
+  }
 
   const loadOrders = useCallback(async () => {
     setError(null);
     try {
-      const data = await fetchOrders();
-      const relevant = data.filter((order) => order.status !== "DELIVERED");
-      setOrders(relevant);
+      const page = await fetchOrders({
+        q: term,
+        status: UNDELIVERED_STATUSES,
+        sort,
+        limit,
+      });
+      const data = page.orders;
+      setOrders(data);
+      setTotal(page.total);
       setSelectedOrderId((current) =>
-        current && relevant.some((order) => order.order_id === current)
+        current && data.some((order) => order.order_id === current)
           ? current
-          : (relevant[0]?.order_id ?? null),
+          : (data[0]?.order_id ?? null),
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load orders");
     }
-  }, []);
+  }, [term, sort, limit]);
 
   useEffect(() => {
     const id = window.setTimeout(() => {
@@ -54,16 +88,13 @@ export default function Overrides() {
     return () => window.clearTimeout(id);
   }, [loadOrders]);
 
-  const filteredOrders = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return term
-      ? orders.filter((order) =>
-          `${order.order_id} ${order.customer_name} ${order.phone} ${order.status}`
-            .toLowerCase()
-            .includes(term),
-        )
-      : orders;
-  }, [orders, search]);
+  const filteredOrders = orders;
+
+  const hasMore = orders.length < total;
+  const sentinel = useInfiniteScroll(
+    () => setLimit((n) => n + PAGE_STEP),
+    hasMore,
+  );
 
   const selectedOrder = orders.find((o) => o.order_id === selectedOrderId) ?? null;
   const allBagged = selectedOrder
@@ -152,8 +183,8 @@ export default function Overrides() {
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="flex items-center gap-4">
+    <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+      <div className="flex shrink-0 items-center gap-4">
         <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-600">
           <OverridesIcon className="h-6 w-6" />
         </span>
@@ -178,19 +209,23 @@ export default function Overrides() {
         </p>
       ) : null}
 
-      <div className="mt-4 grid items-start gap-4 lg:grid-cols-2">
-        <div>
-          <label className="mb-3 block text-sm font-medium text-slate-700">
-            Search orders
+      <div className="mt-4 grid items-start gap-4 lg:min-h-0 lg:flex-1 lg:grid-cols-2 lg:items-stretch">
+        <div className="lg:flex lg:min-h-0 lg:flex-col">
+          <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
+            <span className="text-sm font-medium text-slate-700">Search orders</span>
+            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} />
+          </div>
+          <label className="mb-3 block shrink-0 text-sm font-medium text-slate-700">
+            <span className="sr-only">Search orders</span>
             <input
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => changeSearch(event.target.value)}
               placeholder="Order id, customer, phone, status"
               className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
             />
           </label>
 
-          <div className="max-h-96 space-y-2 overflow-auto pr-1">
+          <div className="max-h-96 space-y-2 overflow-auto pr-1 lg:max-h-none lg:min-h-0 lg:flex-1">
             {loadingOrders ? (
               <Loader label="Loading orders…" />
             ) : filteredOrders.length ? (
@@ -229,10 +264,18 @@ export default function Overrides() {
                 />
               </div>
             )}
+            {hasMore ? (
+              <div
+                ref={sentinel}
+                className="py-3 text-center text-xs font-medium text-slate-400"
+              >
+                Loading more… ({filteredOrders.length} of {total})
+              </div>
+            ) : null}
           </div>
         </div>
 
-        <aside className="rounded-2xl border border-slate-200 bg-slate-50 p-5">
+        <aside className="rounded-2xl border border-slate-200 bg-slate-50 p-5 lg:max-h-full lg:self-start lg:overflow-y-auto">
           {!selectedOrder ? (
             <EmptyState
               icon={<BagIcon className="h-9 w-9" />}

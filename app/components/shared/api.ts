@@ -23,10 +23,70 @@ export type Order = {
   phone: string;
   status: OrderStatus;
   token_number: number | null;
+  token_date?: string | null;
+  uploaded_at?: string;
+  updated_at?: string;
   number_of_items: number;
   bagged_count?: number;
   Order_Lines: OrderLine[];
 };
+
+// Sorting and filtering are server-side: /api/orders returns a single page, so
+// reordering or status-filtering in the browser would only ever touch the first
+// page. Keep these keys in sync with SORTS in app/api/orders/route.ts.
+// `first_<STATUS>` pins that status to the top of the list, with everything
+// else following in pipeline order.
+export type StatusFirstSort = `first_${OrderStatus}`;
+
+export type SortKey =
+  | "newest"
+  | "oldest"
+  | "order_id"
+  | "name"
+  | "token"
+  | "token_desc"
+  | StatusFirstSort;
+
+const BASE_SORT_LABELS: Record<string, string> = {
+  newest: "Newest first",
+  oldest: "Oldest first",
+  order_id: "Order ID (A–Z)",
+  name: "Customer name (A–Z)",
+  token: "Token issued first",
+  token_desc: "Latest token first",
+};
+
+export function statusFirst(status: OrderStatus): StatusFirstSort {
+  return `first_${status}`;
+}
+
+export function sortLabel(key: SortKey): string {
+  if (key.startsWith("first_")) {
+    return `${statusLabel(key.slice("first_".length) as OrderStatus)} first`;
+  }
+  return BASE_SORT_LABELS[key] ?? key;
+}
+
+// Pipeline order, which is also the order statuses fall in behind a pinned one.
+export const ALL_STATUSES: OrderStatus[] = [
+  "PACKAGING_PENDING",
+  "PACKAGED",
+  "TOKEN_ISSUED",
+  "HANDOVER",
+  "READY_FOR_PICKUP",
+  "DELIVERED",
+];
+
+// Everything still in play — the server-side equivalent of "not delivered".
+export const UNDELIVERED_STATUSES: OrderStatus[] = ALL_STATUSES.filter(
+  (s) => s !== "DELIVERED",
+);
+
+// A list offers a "first" option per status it can actually show, so a queue
+// limited to two statuses does not advertise the other four.
+export function statusSorts(statuses: OrderStatus[]): SortKey[] {
+  return statuses.map(statusFirst);
+}
 
 export type ApiUser = {
   id: string;
@@ -44,18 +104,35 @@ export function toApiRole(role: UserRole): string {
   return role.toUpperCase();
 }
 
+// How many more rows each scroll to the bottom asks for.
+export const PAGE_STEP = 100;
+
+export type OrderPage = { orders: Order[]; total: number };
+
 export async function fetchOrders(params?: {
   q?: string;
-  status?: OrderStatus;
-}): Promise<Order[]> {
+  status?: OrderStatus | OrderStatus[];
+  hasToken?: boolean;
+  sort?: SortKey;
+  limit?: number;
+}): Promise<OrderPage> {
   const sp = new URLSearchParams();
   if (params?.q) sp.set("q", params.q);
-  if (params?.status) sp.set("status", params.status);
+  if (params?.status) {
+    const list = Array.isArray(params.status) ? params.status : [params.status];
+    if (list.length) sp.set("status", list.join(","));
+  }
+  if (params?.hasToken) sp.set("hasToken", "1");
+  if (params?.sort) sp.set("sort", params.sort);
+  if (params?.limit) sp.set("pageSize", String(params.limit));
   const qs = sp.toString();
   const res = await fetch(`/api/orders${qs ? `?${qs}` : ""}`);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error ?? "Failed to load orders");
-  return (data.orders ?? []) as Order[];
+  return {
+    orders: (data.orders ?? []) as Order[],
+    total: (data.total ?? 0) as number,
+  };
 }
 
 export async function orderAction(

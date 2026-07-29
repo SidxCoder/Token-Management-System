@@ -7,24 +7,45 @@ import {
   orderAction,
   statusLabel,
   uploadOrders,
+  statusFirst,
+  statusSorts,
+  PAGE_STEP,
   type Order,
+  type OrderStatus,
+  type SortKey,
   type UploadIssue,
 } from "@/app/components/shared/api";
+import { useDebounced } from "@/app/components/shared/useDebounced";
+import { useInfiniteScroll } from "@/app/components/shared/useInfiniteScroll";
 import EmptyState from "@/app/components/dashboard/EmptyState";
 import Loader from "@/app/components/dashboard/Loader";
+import SortSelect from "@/app/components/dashboard/SortSelect";
 import UploadErrorList from "@/app/components/dashboard/UploadErrorList";
 import {
   BoxOpenIcon,
   ClipboardIcon,
   ClockIcon,
   PackingIcon,
+  SearchIcon,
   TicketIcon,
   UploadIcon,
 } from "@/app/components/dashboard/icons";
 
+const PACKING_STATUSES: OrderStatus[] = [
+  "PACKAGING_PENDING",
+  "PACKAGED",
+  "TOKEN_ISSUED",
+];
+
+const SORT_OPTIONS: SortKey[] = [...statusSorts(PACKING_STATUSES), "name"];
+
 // Bag assignment + handover to runner (set_bag_number permission).
 export default function PackingQueue() {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<SortKey>(statusFirst("PACKAGING_PENDING"));
+  const [limit, setLimit] = useState(PAGE_STEP);
+  const [total, setTotal] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [bagDrafts, setBagDrafts] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
@@ -34,25 +55,44 @@ export default function PackingQueue() {
   const [uploadIssues, setUploadIssues] = useState<UploadIssue[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const search = useDebounced(query);
+
+  // A new search or sort means a different result set, so the window resets
+  // here rather than in an effect — that avoids a cascading render and a wasted
+  // fetch at the old limit before the reset lands.
+  function changeQuery(next: string) {
+    setQuery(next);
+    setLimit(PAGE_STEP);
+  }
+
+  function changeSort(next: SortKey) {
+    setSort(next);
+    setLimit(PAGE_STEP);
+  }
+
   const load = useCallback(async () => {
     setError(null);
     try {
-      const data = await fetchOrders();
-      const relevant = data.filter((o) =>
-        ["PACKAGING_PENDING", "PACKAGED", "TOKEN_ISSUED"].includes(o.status),
-      );
-      setOrders(relevant);
+      const page = await fetchOrders({
+        q: search,
+        status: PACKING_STATUSES,
+        sort,
+        limit,
+      });
+      const data = page.orders;
+      setOrders(data);
+      setTotal(page.total);
       setSelectedId((current) =>
-        current && relevant.some((o) => o.order_id === current)
+        current && data.some((o) => o.order_id === current)
           ? current
-          : (relevant[0]?.order_id ?? null),
+          : (data[0]?.order_id ?? null),
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load orders");
     } finally {
       setLoaded(true);
     }
-  }, []);
+  }, [search, sort, limit]);
 
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
@@ -65,6 +105,13 @@ export default function PackingQueue() {
 
   const order = orders.find((o) => o.order_id === selectedId) ?? null;
 
+  const hasMore = orders.length < total;
+  const sentinel = useInfiniteScroll(
+    () => setLimit((n) => n + PAGE_STEP),
+    hasMore,
+  );
+
+  // Counts describe the list as displayed, so they narrow with an active search.
   const summary = useMemo(
     () => ({
       pending: orders.filter((o) => o.status === "PACKAGING_PENDING").length,
@@ -127,7 +174,7 @@ export default function PackingQueue() {
   const canHandOver = order?.status === "TOKEN_ISSUED" && allBagged;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
       <input
         ref={fileRef}
         type="file"
@@ -140,7 +187,7 @@ export default function PackingQueue() {
         }}
       />
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid shrink-0 gap-4 sm:grid-cols-3">
         <Stat icon={<ClockIcon className="h-6 w-6" />} label="Pending" value={summary.pending} />
         <Stat icon={<PackingIcon className="h-6 w-6" />} label="Packaged" value={summary.packaged} />
         <Stat icon={<TicketIcon className="h-6 w-6" />} label="Token issued" value={summary.tokenIssued} />
@@ -154,14 +201,38 @@ export default function PackingQueue() {
 
       {uploadIssues.length ? <UploadErrorList issues={uploadIssues} /> : null}
 
-      <div className="grid items-start gap-6 lg:grid-cols-2">
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-base font-semibold text-slate-900">Bag queue</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Assign bag numbers, then hand over after token is issued.
-          </p>
+      <div className="grid items-start gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-2 lg:items-stretch">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:flex lg:min-h-0 lg:flex-col">
+          <div className="flex shrink-0 items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">Bag queue</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Assign bag numbers, then hand over after token is issued.
+              </p>
+            </div>
+            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} />
+          </div>
+
+          <div className="relative mt-4 shrink-0">
+            <span className="pointer-events-none absolute inset-y-0 left-0 grid w-11 place-items-center text-slate-400">
+              <SearchIcon className="h-5 w-5" />
+            </span>
+            <input
+              value={query}
+              onChange={(event) => changeQuery(event.target.value)}
+              placeholder="Order id, customer, or phone"
+              className="w-full rounded-lg border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
+
           {!loaded ? (
             <Loader label="Loading orders…" />
+          ) : orders.length === 0 && search ? (
+            <EmptyState
+              icon={<BoxOpenIcon className="h-9 w-9" />}
+              title="No order matched your search."
+              subtitle="Try a different order id, customer, or phone."
+            />
           ) : orders.length === 0 ? (
             <EmptyState
               icon={<BoxOpenIcon className="h-9 w-9" />}
@@ -180,7 +251,7 @@ export default function PackingQueue() {
               }
             />
           ) : (
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
               {orders.map((item) => (
                 <button
                   key={item.order_id}
@@ -203,11 +274,19 @@ export default function PackingQueue() {
                   </p>
                 </button>
               ))}
+              {hasMore ? (
+                <div
+                  ref={sentinel}
+                  className="py-3 text-center text-xs font-medium text-slate-400"
+                >
+                  Loading more… ({orders.length} of {total})
+                </div>
+              ) : null}
             </div>
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:max-h-full lg:self-start lg:overflow-y-auto">
           {!order ? (
             <EmptyState
               icon={<ClipboardIcon className="h-9 w-9" />}

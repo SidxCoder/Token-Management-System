@@ -1,13 +1,27 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   fetchOrders,
   orderAction,
   statusLabel,
+  statusSorts,
+  UNDELIVERED_STATUSES,
+  PAGE_STEP,
   type Order,
+  type SortKey,
 } from "@/app/components/shared/api";
+import { useDebounced } from "@/app/components/shared/useDebounced";
+import { useInfiniteScroll } from "@/app/components/shared/useInfiniteScroll";
 import Loader from "@/app/components/dashboard/Loader";
+import SortSelect from "@/app/components/dashboard/SortSelect";
+
+const SORT_OPTIONS: SortKey[] = [
+  "token",
+  "token_desc",
+  ...statusSorts(UNDELIVERED_STATUSES),
+  "name",
+];
 
 // Admin-only token cancellation (cancel_token permission). Cancelling an active
 // token clears the order's token number and returns it to the packing stage.
@@ -20,26 +34,49 @@ export default function CancelToken() {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [sort, setSort] = useState<SortKey>("token");
+  const [limit, setLimit] = useState(PAGE_STEP);
+  const [total, setTotal] = useState(0);
+
+  const term = useDebounced(search);
+
+  // A new search or sort means a different result set, so the window resets
+  // here rather than in an effect — that avoids a cascading render and a wasted
+  // fetch at the old limit before the reset lands.
+  function changeSearch(next: string) {
+    setSearch(next);
+    setLimit(PAGE_STEP);
+  }
+
+  function changeSort(next: SortKey) {
+    setSort(next);
+    setLimit(PAGE_STEP);
+  }
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const data = await fetchOrders();
-      const relevant = data.filter(
-        (o) => o.token_number != null && o.status !== "DELIVERED",
-      );
-      setOrders(relevant);
+      const page = await fetchOrders({
+        q: term,
+        status: UNDELIVERED_STATUSES,
+        hasToken: true,
+        sort,
+        limit,
+      });
+      const data = page.orders;
+      setOrders(data);
+      setTotal(page.total);
       setSelectedId((current) =>
-        current && relevant.some((o) => o.order_id === current)
+        current && data.some((o) => o.order_id === current)
           ? current
-          : (relevant[0]?.order_id ?? null),
+          : (data[0]?.order_id ?? null),
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load orders");
     } finally {
       setLoaded(true);
     }
-  }, []);
+  }, [term, sort, limit]);
 
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
@@ -50,18 +87,14 @@ export default function CancelToken() {
     };
   }, [load]);
 
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return term
-      ? orders.filter((order) =>
-          `${order.order_id} ${order.customer_name} ${order.phone} ${order.token_number}`
-            .toLowerCase()
-            .includes(term),
-        )
-      : orders;
-  }, [orders, search]);
-
+  const filtered = orders;
   const selected = orders.find((o) => o.order_id === selectedId) ?? null;
+
+  const hasMore = orders.length < total;
+  const sentinel = useInfiniteScroll(
+    () => setLimit((n) => n + PAGE_STEP),
+    hasMore,
+  );
 
   async function cancelToken() {
     if (!selected) return;
@@ -81,7 +114,7 @@ export default function CancelToken() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
       {error ? (
         <p className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
@@ -93,17 +126,22 @@ export default function CancelToken() {
         </p>
       ) : null}
 
-      <div className="grid items-start gap-6 lg:grid-cols-2">
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-base font-semibold text-slate-900">Active tokens</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Orders with an issued token that has not been delivered.
-          </p>
-          <label className="mt-4 block">
+      <div className="grid items-start gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-2 lg:items-stretch">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:flex lg:min-h-0 lg:flex-col">
+          <div className="flex shrink-0 items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">Active tokens</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Orders with an issued token that has not been delivered.
+              </p>
+            </div>
+            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} />
+          </div>
+          <label className="mt-4 block shrink-0">
             <span className="sr-only">Search orders</span>
             <input
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => changeSearch(event.target.value)}
               placeholder="Order id, customer, phone, or token"
               className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-100"
             />
@@ -111,7 +149,7 @@ export default function CancelToken() {
           {!loaded ? (
             <Loader label="Loading tokens…" />
           ) : (
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
               {filtered.map((item) => (
                 <button
                   key={item.order_id}
@@ -142,11 +180,19 @@ export default function CancelToken() {
                   No active tokens to cancel.
                 </p>
               )}
+              {hasMore ? (
+                <div
+                  ref={sentinel}
+                  className="py-3 text-center text-xs font-medium text-slate-400"
+                >
+                  Loading more… ({filtered.length} of {total})
+                </div>
+              ) : null}
             </div>
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:max-h-full lg:self-start lg:overflow-y-auto">
           {!selected ? (
             <p className="py-16 text-center text-sm text-slate-500">
               Select an order to cancel its token.

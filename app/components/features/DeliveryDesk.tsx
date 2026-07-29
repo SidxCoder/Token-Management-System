@@ -5,15 +5,23 @@ import {
   fetchOrders,
   orderAction,
   statusLabel,
+  PAGE_STEP,
   type Order,
+  type SortKey,
 } from "@/app/components/shared/api";
+import { useInfiniteScroll } from "@/app/components/shared/useInfiniteScroll";
 import EmptyState from "@/app/components/dashboard/EmptyState";
 import Loader from "@/app/components/dashboard/Loader";
+import SortSelect from "@/app/components/dashboard/SortSelect";
 import {
   ClipboardCheckIcon,
   ClipboardIcon,
   DeliveryIcon,
 } from "@/app/components/dashboard/icons";
+
+// This desk only ever shows READY_FOR_PICKUP, so a "status first" option would
+// have nothing to reorder — token and name are the useful axes here.
+const SORT_OPTIONS: SortKey[] = ["token", "token_desc", "name"];
 
 // Cashier delivery desk: verify token and mark delivered (deliver permission).
 export default function DeliveryDesk() {
@@ -23,12 +31,29 @@ export default function DeliveryDesk() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [sort, setSort] = useState<SortKey>("token");
+  const [limit, setLimit] = useState(PAGE_STEP);
+  const [total, setTotal] = useState(0);
+
+  // A new sort means a different result set, so the window resets here rather
+  // than in an effect — that avoids a cascading render and a wasted fetch at
+  // the old limit before the reset lands.
+  function changeSort(next: SortKey) {
+    setSort(next);
+    setLimit(PAGE_STEP);
+  }
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const data = await fetchOrders({ status: "READY_FOR_PICKUP" });
+      const page = await fetchOrders({
+        status: "READY_FOR_PICKUP",
+        sort,
+        limit,
+      });
+      const data = page.orders;
       setOrders(data);
+      setTotal(page.total);
       setSelectedId((current) =>
         current && data.some((o) => o.order_id === current)
           ? current
@@ -39,7 +64,7 @@ export default function DeliveryDesk() {
     } finally {
       setLoaded(true);
     }
-  }, []);
+  }, [sort, limit]);
 
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
@@ -49,6 +74,12 @@ export default function DeliveryDesk() {
       window.clearInterval(id);
     };
   }, [load]);
+
+  const hasMore = orders.length < total;
+  const sentinel = useInfiniteScroll(
+    () => setLimit((n) => n + PAGE_STEP),
+    hasMore,
+  );
 
   const order = orders.find((o) => o.order_id === selectedId) ?? null;
   const tokenOk =
@@ -76,8 +107,8 @@ export default function DeliveryDesk() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
+    <div className="space-y-6 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+      <div className="flex shrink-0 items-center gap-4 rounded-2xl border border-slate-200 bg-white px-5 py-5 shadow-sm">
         <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-600">
           <DeliveryIcon className="h-6 w-6" />
         </span>
@@ -93,10 +124,15 @@ export default function DeliveryDesk() {
         </p>
       ) : null}
 
-      <div className="grid items-start gap-6 lg:grid-cols-2">
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-base font-semibold text-slate-900">Incoming orders</h2>
-          <p className="mt-1 text-sm text-slate-500">Orders handed over by the runner.</p>
+      <div className="grid items-start gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-2 lg:items-stretch">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:flex lg:min-h-0 lg:flex-col">
+          <div className="flex shrink-0 items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">Incoming orders</h2>
+              <p className="mt-1 text-sm text-slate-500">Orders handed over by the runner.</p>
+            </div>
+            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} />
+          </div>
           {!loaded ? (
             <Loader label="Loading orders…" />
           ) : orders.length === 0 ? (
@@ -106,7 +142,7 @@ export default function DeliveryDesk() {
               subtitle="Orders will appear here once the runner hands them over."
             />
           ) : (
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
               {orders.map((item) => (
                 <button
                   key={item.order_id}
@@ -133,11 +169,19 @@ export default function DeliveryDesk() {
                   </p>
                 </button>
               ))}
+              {hasMore ? (
+                <div
+                  ref={sentinel}
+                  className="py-3 text-center text-xs font-medium text-slate-400"
+                >
+                  Loading more… ({orders.length} of {total})
+                </div>
+              ) : null}
             </div>
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:max-h-full lg:self-start lg:overflow-y-auto">
           {!order ? (
             <EmptyState
               icon={<ClipboardCheckIcon className="h-9 w-9" />}
