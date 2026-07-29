@@ -1,20 +1,33 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   fetchOrders,
   orderAction,
   statusLabel,
+  statusFirst,
+  statusSorts,
+  ALL_STATUSES,
+  PAGE_STEP,
   type Order,
+  type SortKey,
 } from "@/app/components/shared/api";
+import { useDebounced } from "@/app/components/shared/useDebounced";
+import { useInfiniteScroll } from "@/app/components/shared/useInfiniteScroll";
 import EmptyState from "@/app/components/dashboard/EmptyState";
 import Loader from "@/app/components/dashboard/Loader";
+import SortSelect from "@/app/components/dashboard/SortSelect";
 import {
   ClipboardListIcon,
   DocumentSearchIcon,
   InfoIcon,
   SearchIcon,
 } from "@/app/components/dashboard/icons";
+
+const SEARCH_SORTS: SortKey[] = [...statusSorts(ALL_STATUSES), "name"];
+
+// Every row here already has a token, so status matters less than token order.
+const ISSUED_SORTS: SortKey[] = ["token_desc", "token", "name"];
 
 // Token issuing desk (issue_token permission).
 export default function TokenDesk() {
@@ -25,18 +38,54 @@ export default function TokenDesk() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [issued, setIssued] = useState<Order[]>([]);
+  const [sort, setSort] = useState<SortKey>(statusFirst("PACKAGED"));
+  const [issuedSort, setIssuedSort] = useState<SortKey>("token_desc");
+  // The two tabs scroll independently, so each keeps its own window.
+  const [limit, setLimit] = useState(PAGE_STEP);
+  const [issuedLimit, setIssuedLimit] = useState(PAGE_STEP);
+  const [total, setTotal] = useState(0);
+  const [issuedTotal, setIssuedTotal] = useState(0);
 
+  const search = useDebounced(query);
+
+  // Each tab resets its own window at the event rather than in an effect — that
+  // avoids a cascading render and a wasted fetch at the old limit.
+  function changeQuery(next: string) {
+    setQuery(next);
+    setLimit(PAGE_STEP);
+  }
+
+  function changeSort(next: SortKey) {
+    setSort(next);
+    setLimit(PAGE_STEP);
+  }
+
+  function changeIssuedSort(next: SortKey) {
+    setIssuedSort(next);
+    setIssuedLimit(PAGE_STEP);
+  }
+
+  // Two requests: the search tab browses every order, the issued tab needs only
+  // orders that already carry a token. Both filters are server-side so neither
+  // list is limited to whatever happened to land on the first page.
   const load = useCallback(async () => {
     setError(null);
     try {
-      const data = await fetchOrders();
-      setOrders(data);
+      const [all, withToken] = await Promise.all([
+        fetchOrders({ q: search, sort, limit }),
+        fetchOrders({ hasToken: true, sort: issuedSort, limit: issuedLimit }),
+      ]);
+      setOrders(all.orders);
+      setTotal(all.total);
+      setIssued(withToken.orders);
+      setIssuedTotal(withToken.total);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load orders");
     } finally {
       setLoaded(true);
     }
-  }, []);
+  }, [search, sort, issuedSort, limit, issuedLimit]);
 
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
@@ -47,23 +96,18 @@ export default function TokenDesk() {
     };
   }, [load]);
 
-  const results = useMemo(() => {
-    const search = query.trim().toLowerCase();
-    return search
-      ? orders.filter((order) =>
-          `${order.order_id} ${order.customer_name} ${order.phone}`
-            .toLowerCase()
-            .includes(search),
-        )
-      : orders;
-  }, [orders, query]);
+  const results = orders;
 
-  const issued = useMemo(
-    () =>
-      orders
-        .filter((o) => o.token_number != null)
-        .sort((a, b) => (b.token_number ?? 0) - (a.token_number ?? 0)),
-    [orders],
+  const hasMore = orders.length < total;
+  const sentinel = useInfiniteScroll(
+    () => setLimit((n) => n + PAGE_STEP),
+    hasMore,
+  );
+
+  const hasMoreIssued = issued.length < issuedTotal;
+  const issuedSentinel = useInfiniteScroll(
+    () => setIssuedLimit((n) => n + PAGE_STEP),
+    hasMoreIssued,
   );
 
   const selected = orders.find((o) => o.order_id === selectedId) ?? null;
@@ -86,9 +130,9 @@ export default function TokenDesk() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
       {loaded && orders.length === 0 ? (
-        <section className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="flex shrink-0 items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-600">
             <InfoIcon className="h-6 w-6" />
           </span>
@@ -108,7 +152,7 @@ export default function TokenDesk() {
         </p>
       ) : null}
 
-      <div className="flex gap-2 border-b border-slate-200">
+      <div className="flex shrink-0 gap-2 border-b border-slate-200">
         <TabButton active={view === "search"} onClick={() => setView("search")}>
           Search order
         </TabButton>
@@ -121,16 +165,19 @@ export default function TokenDesk() {
       </div>
 
       {view === "search" ? (
-        <div className="grid items-start gap-6 lg:grid-cols-2">
-          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="text-base font-semibold text-slate-900">Search order</h2>
-            <div className="relative mt-4">
+        <div className="grid items-start gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-2 lg:items-stretch">
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:flex lg:min-h-0 lg:flex-col">
+            <div className="flex shrink-0 items-center justify-between gap-3">
+              <h2 className="text-base font-semibold text-slate-900">Search order</h2>
+              <SortSelect value={sort} options={SEARCH_SORTS} onChange={changeSort} />
+            </div>
+            <div className="relative mt-4 shrink-0">
               <span className="pointer-events-none absolute inset-y-0 left-0 grid w-11 place-items-center text-slate-400">
                 <SearchIcon className="h-5 w-5" />
               </span>
               <input
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => changeQuery(event.target.value)}
                 placeholder="Order number, name, or phone"
                 className="w-full rounded-lg border border-slate-200 bg-white py-3 pl-11 pr-4 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
               />
@@ -138,7 +185,7 @@ export default function TokenDesk() {
             {!loaded ? (
               <Loader label="Loading orders…" />
             ) : results.length ? (
-              <div className="mt-5 space-y-3">
+              <div className="mt-5 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
                 {results.map((order) => (
                   <button
                     key={order.order_id}
@@ -158,6 +205,14 @@ export default function TokenDesk() {
                     <StatusBadge status={order.status} />
                   </button>
                 ))}
+                {hasMore ? (
+                  <div
+                    ref={sentinel}
+                    className="py-3 text-center text-xs font-medium text-slate-400"
+                  >
+                    Loading more… ({results.length} of {total})
+                  </div>
+                ) : null}
               </div>
             ) : (
               <EmptyState
@@ -168,7 +223,7 @@ export default function TokenDesk() {
             )}
           </section>
 
-          <aside className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <aside className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:max-h-full lg:self-start lg:overflow-y-auto">
             {!selected ? (
               <EmptyState
                 icon={<ClipboardListIcon className="h-9 w-9" />}
@@ -212,15 +267,22 @@ export default function TokenDesk() {
           </aside>
         </div>
       ) : (
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-100 px-5 py-5">
-            <h2 className="font-semibold text-slate-900">Issued tokens</h2>
-            <p className="mt-1 text-sm text-slate-500">
-              Orders that currently have a token number.
-            </p>
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+          <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-5 py-5">
+            <div>
+              <h2 className="font-semibold text-slate-900">Issued tokens</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Orders that currently have a token number.
+              </p>
+            </div>
+            <SortSelect
+              value={issuedSort}
+              options={ISSUED_SORTS}
+              onChange={changeIssuedSort}
+            />
           </div>
           {issued.length ? (
-            <div className="divide-y divide-slate-100">
+            <div className="divide-y divide-slate-100 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
               {issued.map((order) => (
                 <div
                   key={order.order_id}
@@ -237,6 +299,14 @@ export default function TokenDesk() {
                   <StatusBadge status={order.status} />
                 </div>
               ))}
+              {hasMoreIssued ? (
+                <div
+                  ref={issuedSentinel}
+                  className="py-3 text-center text-xs font-medium text-slate-400"
+                >
+                  Loading more… ({issued.length} of {issuedTotal})
+                </div>
+              ) : null}
             </div>
           ) : (
             <p className="px-5 py-12 text-center text-sm text-slate-500">

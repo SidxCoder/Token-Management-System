@@ -6,16 +6,32 @@ import {
   fetchOrders,
   orderAction,
   statusLabel,
+  statusFirst,
+  statusSorts,
+  PAGE_STEP,
   type Order,
+  type OrderStatus,
+  type SortKey,
 } from "@/app/components/shared/api";
+import { useInfiniteScroll } from "@/app/components/shared/useInfiniteScroll";
 import EmptyState from "@/app/components/dashboard/EmptyState";
 import Loader from "@/app/components/dashboard/Loader";
+import SortSelect from "@/app/components/dashboard/SortSelect";
 import {
   BagIcon,
   ClipboardListIcon,
   RunnerIcon,
   TicketIcon,
 } from "@/app/components/dashboard/icons";
+
+const RUNNER_STATUSES: OrderStatus[] = ["TOKEN_ISSUED", "HANDOVER"];
+
+const SORT_OPTIONS: SortKey[] = [
+  ...statusSorts(RUNNER_STATUSES),
+  "token",
+  "token_desc",
+  "name",
+];
 
 // Runner handovers: collect from packager, hand to cashier (hand_to_cashier).
 export default function RunnerQueue() {
@@ -24,15 +40,25 @@ export default function RunnerQueue() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [sort, setSort] = useState<SortKey>(statusFirst("TOKEN_ISSUED"));
+  const [limit, setLimit] = useState(PAGE_STEP);
+  const [total, setTotal] = useState(0);
+
+  // A new sort means a different result set, so the window resets here rather
+  // than in an effect — that avoids a cascading render and a wasted fetch at
+  // the old limit before the reset lands.
+  function changeSort(next: SortKey) {
+    setSort(next);
+    setLimit(PAGE_STEP);
+  }
 
   const load = useCallback(async () => {
     setError(null);
     try {
-      const data = await fetchOrders();
-      const relevant = data.filter((o) =>
-        ["TOKEN_ISSUED", "HANDOVER"].includes(o.status),
-      );
+      const page = await fetchOrders({ status: RUNNER_STATUSES, sort, limit });
+      const relevant = page.orders;
       setOrders(relevant);
+      setTotal(page.total);
       setSelectedId((current) =>
         current && relevant.some((o) => o.order_id === current)
           ? current
@@ -43,7 +69,7 @@ export default function RunnerQueue() {
     } finally {
       setLoaded(true);
     }
-  }, []);
+  }, [sort, limit]);
 
   useEffect(() => {
     const initial = window.setTimeout(() => void load(), 0);
@@ -55,6 +81,12 @@ export default function RunnerQueue() {
   }, [load]);
 
   const order = orders.find((o) => o.order_id === selectedId) ?? null;
+
+  const hasMore = orders.length < total;
+  const sentinel = useInfiniteScroll(
+    () => setLimit((n) => n + PAGE_STEP),
+    hasMore,
+  );
 
   const summary = useMemo(
     () => ({
@@ -93,8 +125,8 @@ export default function RunnerQueue() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2">
+    <div className="space-y-6 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
+      <div className="grid shrink-0 gap-4 sm:grid-cols-2">
         <Stat icon={<BagIcon className="h-6 w-6" />} label="Ready to collect" value={summary.collect} />
         <Stat icon={<RunnerIcon className="h-6 w-6" />} label="Awaiting cashier" value={summary.handover} />
       </div>
@@ -105,12 +137,17 @@ export default function RunnerQueue() {
         </p>
       ) : null}
 
-      <div className="grid items-start gap-6 lg:grid-cols-2">
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-base font-semibold text-slate-900">Assigned tokens</h2>
-          <p className="mt-1 text-sm text-slate-500">
-            Collect from packager, then hand to cashier.
-          </p>
+      <div className="grid items-start gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-2 lg:items-stretch">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:flex lg:min-h-0 lg:flex-col">
+          <div className="flex shrink-0 items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">Assigned tokens</h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Collect from packager, then hand to cashier.
+              </p>
+            </div>
+            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} />
+          </div>
           {!loaded ? (
             <Loader label="Loading tokens…" />
           ) : orders.length === 0 ? (
@@ -120,7 +157,7 @@ export default function RunnerQueue() {
               subtitle="Once tokens are assigned, they will appear here."
             />
           ) : (
-            <div className="mt-4 space-y-3">
+            <div className="mt-4 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
               {orders.map((item) => (
                 <button
                   key={item.order_id}
@@ -147,11 +184,19 @@ export default function RunnerQueue() {
                   </p>
                 </button>
               ))}
+              {hasMore ? (
+                <div
+                  ref={sentinel}
+                  className="py-3 text-center text-xs font-medium text-slate-400"
+                >
+                  Loading more… ({orders.length} of {total})
+                </div>
+              ) : null}
             </div>
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:max-h-full lg:self-start lg:overflow-y-auto">
           {!order ? (
             <EmptyState
               icon={<TicketIcon className="h-9 w-9" />}
