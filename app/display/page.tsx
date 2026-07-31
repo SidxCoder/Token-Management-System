@@ -6,7 +6,27 @@ import { ShieldLock } from "@/app/components/dashboard/icons";
 type DisplayOrder = {
   token: number | null;
   order: string;
+  readyAt: string;
 };
+
+const STORE_NAME = "Samsung BKC";
+
+// How long the customer has been waiting since the order hit the counter.
+// Recomputed against a ticking clock so it counts up between the 3s polls.
+function waitingFor(readyAt: string, now: number) {
+  const ms = Math.max(0, now - new Date(readyAt).getTime());
+  const totalMinutes = Math.floor(ms / 60_000);
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  return `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
+}
+
+// Long waits should be obvious from across the room.
+function waitTone(readyAt: string, now: number) {
+  const minutes = (now - new Date(readyAt).getTime()) / 60_000;
+  if (minutes >= 15) return "bg-red-500/20 text-red-300";
+  if (minutes >= 5) return "bg-amber-500/20 text-amber-300";
+  return "bg-white/10 text-slate-300";
+}
 
 // The customer-facing pickup board is intentionally dark and high-contrast:
 // it is shown on a wall-mounted screen, so oversized token numbers on a deep
@@ -15,9 +35,13 @@ type DisplayOrder = {
 export default function CustomerDisplayPage() {
   const [orders, setOrders] = useState<DisplayOrder[]>([]);
   const [clock, setClock] = useState("");
+  // Drives the per-order waiting timers; the same tick already runs for the
+  // wall clock, so this costs nothing extra.
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    const tick = () =>
+    const tick = () => {
+      setNow(Date.now());
       setClock(
         new Intl.DateTimeFormat("en-IN", {
           hour: "numeric",
@@ -25,6 +49,7 @@ export default function CustomerDisplayPage() {
           second: "2-digit",
         }).format(new Date()),
       );
+    };
     tick();
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
@@ -54,7 +79,7 @@ export default function CustomerDisplayPage() {
               Pickup Display
             </p>
             <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">
-              Ready for Pickup
+              {STORE_NAME}
             </h1>
           </div>
         </div>
@@ -80,9 +105,16 @@ export default function CustomerDisplayPage() {
                   {String(order.token).padStart(2, "0")}
                 </p>
                 <p className="mt-6 text-lg text-slate-400">{order.order}</p>
-                <p className="mt-4 inline-block rounded-full bg-blue-500/15 px-4 py-2 text-sm font-semibold text-blue-300">
-                  Ready for Pickup
-                </p>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                  <span className="inline-block rounded-full bg-blue-500/15 px-4 py-2 text-sm font-semibold text-blue-300">
+                    Ready for Pickup
+                  </span>
+                  <span
+                    className={`inline-block rounded-full px-4 py-2 text-sm font-semibold tabular-nums ${waitTone(order.readyAt, now)}`}
+                  >
+                    waiting {waitingFor(order.readyAt, now)}
+                  </span>
+                </div>
               </article>
             ))}
           </div>

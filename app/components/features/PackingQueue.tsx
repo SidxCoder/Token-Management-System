@@ -9,17 +9,23 @@ import {
   uploadOrders,
   statusFirst,
   statusSorts,
+  fetchStaff,
+  staffLabel,
   PAGE_STEP,
   type Order,
+  type Staff,
   type OrderStatus,
   type SortKey,
   type UploadIssue,
 } from "@/app/components/shared/api";
 import { useDebounced } from "@/app/components/shared/useDebounced";
+import { useActionError } from "@/app/components/shared/useActionError";
 import { useInfiniteScroll } from "@/app/components/shared/useInfiniteScroll";
+import { usePolling } from "@/app/components/shared/usePolling";
 import EmptyState from "@/app/components/dashboard/EmptyState";
 import Loader from "@/app/components/dashboard/Loader";
 import SortSelect from "@/app/components/dashboard/SortSelect";
+import DetailPane from "@/app/components/dashboard/DetailPane";
 import UploadErrorList from "@/app/components/dashboard/UploadErrorList";
 import {
   BoxOpenIcon,
@@ -46,16 +52,26 @@ export default function PackingQueue() {
   const [sort, setSort] = useState<SortKey>(statusFirst("PACKAGING_PENDING"));
   const [limit, setLimit] = useState(PAGE_STEP);
   const [total, setTotal] = useState(0);
+  // Phone-only overlay; opens on tap, never from load()'s auto-select.
+  const [detailOpen, setDetailOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [bagDrafts, setBagDrafts] = useState<Record<string, string>>({});
-  const [error, setError] = useState<string | null>(null);
+  const { error, setActionError, setLoadError, clearLoadError } = useActionError();
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadIssues, setUploadIssues] = useState<UploadIssue[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const [runners, setRunners] = useState<Staff[]>([]);
+  const [runnerId, setRunnerId] = useState("");
+
   const search = useDebounced(query);
+
+  // Runner list changes rarely, so it is fetched once rather than on the poll.
+  useEffect(() => {
+    void fetchStaff("RUNNER").then(setRunners);
+  }, []);
 
   // A new search or sort means a different result set, so the window resets
   // here rather than in an effect — that avoids a cascading render and a wasted
@@ -71,7 +87,6 @@ export default function PackingQueue() {
   }
 
   const load = useCallback(async () => {
-    setError(null);
     try {
       const page = await fetchOrders({
         q: search,
@@ -82,26 +97,20 @@ export default function PackingQueue() {
       const data = page.orders;
       setOrders(data);
       setTotal(page.total);
+      clearLoadError();
       setSelectedId((current) =>
         current && data.some((o) => o.order_id === current)
           ? current
           : (data[0]?.order_id ?? null),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load orders");
+      setLoadError(e instanceof Error ? e.message : "Failed to load orders");
     } finally {
       setLoaded(true);
     }
-  }, [search, sort, limit]);
+  }, [search, sort, limit, setLoadError, clearLoadError]);
 
-  useEffect(() => {
-    const initial = window.setTimeout(() => void load(), 0);
-    const id = window.setInterval(() => void load(), 4000);
-    return () => {
-      window.clearTimeout(initial);
-      window.clearInterval(id);
-    };
-  }, [load]);
+  usePolling(load, 4000);
 
   const order = orders.find((o) => o.order_id === selectedId) ?? null;
 
@@ -123,7 +132,7 @@ export default function PackingQueue() {
 
   async function uploadExcel(file: File) {
     setUploading(true);
-    setError(null);
+    setActionError(null);
     setUploadIssues([]);
     const result = await uploadOrders(file);
     if (result.ok) {
@@ -139,16 +148,16 @@ export default function PackingQueue() {
     const raw = bagDrafts[lineId]?.trim();
     const bagNumber = Number(raw);
     if (!raw || !Number.isInteger(bagNumber) || bagNumber < 1) {
-      setError("Enter a positive bag number");
+      setActionError("Enter a positive bag number");
       return;
     }
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       await orderAction(order.order_id, "set_bag_number", { lineId, bagNumber });
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to set bag number");
+      setActionError(e instanceof Error ? e.message : "Failed to set bag number");
     } finally {
       setBusy(false);
     }
@@ -156,13 +165,17 @@ export default function PackingQueue() {
 
   async function handToRunner() {
     if (!order) return;
+    if (!runnerId) {
+      setActionError("Pick which runner is collecting this bag");
+      return;
+    }
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
-      await orderAction(order.order_id, "hand_to_runner");
+      await orderAction(order.order_id, "hand_to_runner", { runnerId });
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to hand over");
+      setActionError(e instanceof Error ? e.message : "Failed to hand over");
     } finally {
       setBusy(false);
     }
@@ -255,7 +268,10 @@ export default function PackingQueue() {
               {orders.map((item) => (
                 <button
                   key={item.order_id}
-                  onClick={() => setSelectedId(item.order_id)}
+                  onClick={() => {
+                    setSelectedId(item.order_id);
+                    setDetailOpen(true);
+                  }}
                   className={`w-full rounded-xl border p-4 text-left transition ${
                     item.order_id === selectedId
                       ? "border-blue-500 bg-blue-50"
@@ -286,7 +302,11 @@ export default function PackingQueue() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:max-h-full lg:self-start lg:overflow-y-auto">
+        <DetailPane
+          open={detailOpen}
+          title="orders"
+          onClose={() => setDetailOpen(false)}
+        >
           {!order ? (
             <EmptyState
               icon={<ClipboardIcon className="h-9 w-9" />}
@@ -353,21 +373,42 @@ export default function PackingQueue() {
                 </div>
               </div>
 
+              <label className="mt-6 block text-sm font-medium text-slate-700">
+                Handing over to
+                <select
+                  value={runnerId}
+                  onChange={(event) => setRunnerId(event.target.value)}
+                  disabled={!canHandOver || busy}
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400"
+                >
+                  <option value="">Select a runner…</option>
+                  {runners.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {staffLabel("Runner", r)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
               <button
                 onClick={handToRunner}
-                disabled={!canHandOver || busy}
-                className="mt-6 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+                disabled={!canHandOver || busy || !runnerId}
+                className="mt-3 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >
                 Hand over to runner
               </button>
-              {!canHandOver && (
+              {!canHandOver ? (
                 <p className="mt-3 text-center text-xs text-slate-400">
                   Needs token issued and every line bagged.
                 </p>
-              )}
+              ) : runners.length === 0 ? (
+                <p className="mt-3 text-center text-xs text-slate-400">
+                  No active runners. Add one under Users.
+                </p>
+              ) : null}
             </>
           )}
-        </section>
+        </DetailPane>
       </div>
     </div>
   );

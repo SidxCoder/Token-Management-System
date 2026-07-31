@@ -1,3 +1,4 @@
+import { invalidateSession } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
@@ -8,6 +9,7 @@ export async function POST() {
     const token = cookieStore.get("session")?.value;
 
     if(token){
+        invalidateSession(token);
         await prisma.sessions.deleteMany({where: {token}})
     }
 

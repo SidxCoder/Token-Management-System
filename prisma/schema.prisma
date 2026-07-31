@@ -20,10 +20,22 @@ model User {
   display_name String
   role Role
   active Boolean @default(true)
+  // Audit_Log.user_id and Tokens.issued_by are ON DELETE RESTRICT, so a user
+  // who has ever acted cannot be removed without destroying the audit trail.
+  // Deleting such a user archives them instead: hidden everywhere, cannot log
+  // in, history intact.
+  archived Boolean @default(false)
+  // Station number shown to staff ("Runner 2", "Cashier 1") and used to pick a
+  // specific person at handover. Unique per role; null for roles without one.
+  station_number Int?
   sessions Sessions[]
   issued_tokens Tokens[] @relation("IssuedTokens")
   cancelled_tokens Tokens[] @relation("CancelledTokens")
+  runner_orders Orders[] @relation("RunnerOrders")
+  cashier_orders Orders[] @relation("CashierOrders")
   Audit Audit_Log[]
+
+  @@unique([role, station_number])
 }
 
 enum Role {
@@ -52,6 +64,15 @@ model Orders {
   token_date DateTime?
   uploaded_at DateTime @default(now())
   updated_at DateTime @updatedAt
+  // Who the order was handed to. Set at handover so each runner/cashier sees
+  // only their own queue; null until that stage is reached.
+  runner_id String?
+  runner User? @relation("RunnerOrders", fields: [runner_id], references: [id])
+  cashier_id String?
+  cashier User? @relation("CashierOrders", fields: [cashier_id], references: [id])
+  // When the order entered READY_FOR_PICKUP — drives the waiting timer on the
+  // customer display. Separate from updated_at, which any later edit bumps.
+  ready_at DateTime?
   Order_Lines Order_Lines[]
   number_of_items Int
   Token Tokens[]

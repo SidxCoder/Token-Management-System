@@ -24,6 +24,16 @@ const MAX_PAGE_SIZE = 1000
 // lists would surface as rows shuffling on their own.
 const TIEBREAK = { order_id: "asc" } as const;
 
+// Only the line fields any component actually reads. `sku_description` and the
+// repeated `order_ref_id` uuid were ~28% of the list payload and nothing renders
+// them; the full row is still available from /api/orders/[orderId].
+const LINE_SELECT = {
+    id: true,
+    product_name: true,
+    bag_number: true,
+    sku_code: true,
+} as const;
+
 const SORTS = {
     newest: [{ uploaded_at: "desc" }, TIEBREAK],
     oldest: [{ uploaded_at: "asc" }, TIEBREAK],
@@ -112,9 +122,23 @@ export async function GET(req: NextRequest) {
     // server-side for the same paging reason as `status`.
     const hasToken = sp.get("hasToken") === "1";
 
+    // `mine=1` scopes a queue to the signed-in station. The filter is derived
+    // from the session role rather than trusted from the client, so a runner
+    // cannot ask for another runner's queue. Unassigned rows stay visible so
+    // nothing stranded before this feature existed becomes unreachable, and so
+    // runners can still claim from the unclaimed pool.
+    const mine = sp.get("mine") === "1";
+    const mineFilter =
+        mine && user.role === "RUNNER"
+            ? { OR: [{ runner_id: user.id }, { runner_id: null }] }
+            : mine && user.role === "CASHIER"
+              ? { OR: [{ cashier_id: user.id }, { cashier_id: null }] }
+              : {};
+
     const where = {
         ...(statuses.length ? {status: { in: statuses as Status[] }} : {}),
         ...(hasToken ? {token_number: { not: null }} : {}),
+        ...mineFilter,
         ...(q ? {
             OR: [
                 { order_id: { contains: q, mode: "insensitive" as const } },
@@ -133,49 +157,56 @@ export async function GET(req: NextRequest) {
     // Pinned page: take what fits from the pinned status, then top the page up
     // from everything else. Splitting it this way keeps `skip`/`take` correct on
     // any page rather than only the first.
-    async function pinnedPage(status: Status) {
+    // Two round trips, not four: the counts settle together, then both page
+    // queries run together. Every DB call here crosses a region boundary, so
+    // wall time is round trips × latency — the query work itself is microseconds.
+    async function pinnedPage(status: Status, topTotal: number) {
         const top = { AND: [where, { status }] };
         const rest = { AND: [where, { status: { not: status } }] };
 
-        const topTotal = await prisma.orders.count({ where: top });
         const takeTop = Math.max(0, Math.min(pageSize, topTotal - skip));
+        const takeRest = pageSize - takeTop;
 
-        const topRows = takeTop
-            ? await prisma.orders.findMany({
-                  where: top,
-                  orderBy: [TIEBREAK],
-                  skip,
-                  take: takeTop,
-                  include: { Order_Lines: true },
-              })
-            : [];
-
-        const takeRest = pageSize - topRows.length;
-        const restRows = takeRest
-            ? await prisma.orders.findMany({
-                  where: rest,
-                  orderBy: [...REST_ORDER],
-                  skip: Math.max(0, skip - topTotal),
-                  take: takeRest,
-                  include: { Order_Lines: true },
-              })
-            : [];
+        const [topRows, restRows] = await Promise.all([
+            takeTop
+                ? prisma.orders.findMany({
+                      where: top,
+                      orderBy: [TIEBREAK],
+                      skip,
+                      take: takeTop,
+                      include: { Order_Lines: { select: LINE_SELECT } },
+                  })
+                : [],
+            takeRest
+                ? prisma.orders.findMany({
+                      where: rest,
+                      orderBy: [...REST_ORDER],
+                      skip: Math.max(0, skip - topTotal),
+                      take: takeRest,
+                      include: { Order_Lines: { select: LINE_SELECT } },
+                  })
+                : [],
+        ]);
 
         return [...topRows, ...restRows];
     }
 
-    const [total, orders] = await Promise.all([
+    const [total, topTotal] = await Promise.all([
         prisma.orders.count({ where }),
         pinned
-            ? pinnedPage(pinned)
-            : prisma.orders.findMany({
-                  where,
-                  orderBy: [...SORTS[sort]],
-                  skip,
-                  take: pageSize,
-                  include: { Order_Lines: true},
-              })
-    ])
+            ? prisma.orders.count({ where: { AND: [where, { status: pinned }] } })
+            : Promise.resolve(0),
+    ]);
+
+    const orders = pinned
+        ? await pinnedPage(pinned, topTotal)
+        : await prisma.orders.findMany({
+              where,
+              orderBy: [...SORTS[sort]],
+              skip,
+              take: pageSize,
+              include: { Order_Lines: { select: LINE_SELECT } },
+          });
 
     return NextResponse.json({
         orders: orders.map((o)=> ({

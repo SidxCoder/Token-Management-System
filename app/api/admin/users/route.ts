@@ -1,11 +1,26 @@
-import { getSessionUser } from "@/lib/auth";
+import { getSessionUser, invalidateAllSessions } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { Role } from "@/lib/generated/prisma/client";
 import { can } from "@/lib/permissions";
 import { NextRequest, NextResponse } from "next/server";
 
 // never send the password column to the client
-const USER_SELECT = { id: true, username: true, display_name: true, role: true, active: true } as const;
+const USER_SELECT = { id: true, username: true, display_name: true, role: true, active: true, station_number: true } as const;
+
+// Station numbers identify a specific runner/cashier at handover. Only those two
+// roles have one; the DB enforces uniqueness per role.
+function parseStation(raw: unknown, role: Role | undefined) {
+    if (raw === undefined) return undefined;
+    if (raw === null || raw === "") return null;
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 1) {
+        throw new Error("station number must be a positive whole number");
+    }
+    if (role && role !== Role.RUNNER && role !== Role.CASHIER) {
+        throw new Error("only runners and cashiers can have a station number");
+    }
+    return n;
+}
 
 async function requireAdmin() {
     const user = await getSessionUser();
@@ -20,8 +35,66 @@ export async function GET() {
     const { user, error } = await requireAdmin();
     if (!user) return error;
 
-    const users = await prisma.user.findMany({ select: USER_SELECT, orderBy: { username: "asc" } });
+    const users = await prisma.user.findMany({
+        where: { archived: false },
+        select: USER_SELECT,
+        orderBy: { username: "asc" },
+    });
     return NextResponse.json(users);
+}
+
+export async function DELETE(req: NextRequest) {
+    const { user, error } = await requireAdmin();
+    if (!user) return error;
+
+    const id = req.nextUrl.searchParams.get("id");
+    if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
+    if (id === user.id) {
+        return NextResponse.json({ error: "you cannot delete your own account" }, { status: 400 });
+    }
+
+    const target = await prisma.user.findUnique({ where: { id } });
+    if (!target || target.archived) {
+        return NextResponse.json({ error: "user not found" }, { status: 404 });
+    }
+
+    // Audit_Log.user_id and Tokens.issued_by are ON DELETE RESTRICT, so a user
+    // who has ever acted cannot be removed without destroying history. Delete
+    // only untouched accounts; archive the rest.
+    const [audits, tokens] = await Promise.all([
+        prisma.audit_Log.count({ where: { user_id: id } }),
+        prisma.tokens.count({ where: { issued_by: id } }),
+    ]);
+    const hasHistory = audits > 0 || tokens > 0;
+
+    await prisma.$transaction(async (tx) => {
+        if (hasHistory) {
+            await tx.user.update({
+                where: { id },
+                data: { archived: true, active: false, station_number: null },
+            });
+        } else {
+            // Sessions cascade; nothing else references an account with no history.
+            await tx.user.delete({ where: { id } });
+        }
+        await tx.audit_Log.create({
+            data: {
+                user_id: user.id, username: user.username, role: user.role,
+                action: hasHistory ? "archive_user" : "delete_user",
+                details: { target: target.username, audits, tokens },
+            },
+        });
+    });
+
+    invalidateAllSessions();
+
+    return NextResponse.json({
+        ok: true,
+        archived: hasHistory,
+        message: hasHistory
+            ? `${target.display_name} had ${audits} audit entries and ${tokens} issued tokens, so the account was archived instead of deleted. History is preserved.`
+            : `${target.display_name} was deleted.`,
+    });
 }
 
 export async function POST(req: NextRequest) {
@@ -29,7 +102,14 @@ export async function POST(req: NextRequest) {
     if (!user) return error;
 
     const body = await req.json().catch(() => null);
-    const { username, password, display_name, role } = body ?? {};
+    const { username, password, display_name, role, station_number } = body ?? {};
+
+    let station: number | null | undefined;
+    try {
+        station = parseStation(station_number, role as Role);
+    } catch (e) {
+        return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    }
 
     if (!username?.trim() || !password || !display_name?.trim()) {
         return NextResponse.json({ error: "username, password and display_name are required" }, { status: 400 });
@@ -48,6 +128,7 @@ export async function POST(req: NextRequest) {
                 password_hash: password,   // plaintext by project decision (plan.md §11)
                 display_name: display_name.trim(),
                 role: role as Role,
+                ...(station !== undefined ? { station_number: station } : {}),
             },
             select: USER_SELECT,
         });
@@ -69,7 +150,7 @@ export async function PATCH(req: NextRequest) {
     if (!user) return error;
 
     const body = await req.json().catch(() => null);
-    const { id, active, password, display_name, role } = body ?? {};
+    const { id, active, password, display_name, role, station_number } = body ?? {};
 
     if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
     if (id === user.id && active === false) {
@@ -82,11 +163,19 @@ export async function PATCH(req: NextRequest) {
     const target = await prisma.user.findUnique({ where: { id } });
     if (!target) return NextResponse.json({ error: "user not found" }, { status: 404 });
 
+    let station: number | null | undefined;
+    try {
+        station = parseStation(station_number, (role as Role) ?? target.role);
+    } catch (e) {
+        return NextResponse.json({ error: (e as Error).message }, { status: 400 });
+    }
+
     const data = {
         ...(active !== undefined ? { active: Boolean(active) } : {}),
         ...(password ? { password_hash: password } : {}),
         ...(display_name?.trim() ? { display_name: display_name.trim() } : {}),
         ...(role !== undefined ? { role: role as Role } : {}),
+        ...(station !== undefined ? { station_number: station } : {}),
     };
     if (Object.keys(data).length === 0) {
         return NextResponse.json({ error: "nothing to update" }, { status: 400 });
@@ -104,6 +193,10 @@ export async function PATCH(req: NextRequest) {
         });
         return u;
     });
+
+    // Deactivating or changing a role must take effect immediately, not after
+    // the session cache TTL.
+    invalidateAllSessions();
 
     return NextResponse.json(updated);
 }

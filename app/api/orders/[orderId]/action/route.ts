@@ -22,9 +22,9 @@ export async function POST(req: NextRequest, { params }: {params: Promise< {orde
             case "set_bag_number":
                 return NextResponse.json( await setBagNumber(user,orderId, payload));
             case "hand_to_runner":
-                return NextResponse.json( await handToRunner(user, orderId));
+                return NextResponse.json( await handToRunner(user, orderId, payload));
             case "hand_to_cashier":
-                return NextResponse.json( await handToCashier(user, orderId));
+                return NextResponse.json( await handToCashier(user, orderId, payload));
             case "deliver":
                 return NextResponse.json( await deliver(user, orderId));
             case "cancel_token":

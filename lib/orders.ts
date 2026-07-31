@@ -230,30 +230,52 @@ export async function setBagNumber(user: Actor, orderId: string, payload: {lineI
     })
 }
 
-export async function handToRunner(user:Actor, orderId: string) {
+// Resolves the person an order is being handed to. Runners may claim an order
+// for themselves without naming a target; every other case must name one, so a
+// bag is always traceable to a specific station rather than a role.
+async function resolveTarget(tx: Tx, actor: Actor, role: Role, targetId?: string) {
+    if (!targetId) {
+        if (actor.role === role) return actor.id;
+        throw new WorkflowError(400, `pick which ${role.toLowerCase()} to hand over to`);
+    }
+
+    const target = await tx.user.findUnique({ where: { id: targetId } });
+    if (!target || target.role !== role) {
+        throw new WorkflowError(400, `"${targetId}" is not a ${role.toLowerCase()}`);
+    }
+    if (!target.active || target.archived) {
+        throw new WorkflowError(409, `${target.display_name} is not available`);
+    }
+    return target.id;
+}
+
+export async function handToRunner(user:Actor, orderId: string, payload: { runnerId?: string } = {}) {
     if(!can(user.role, "hand_to_runner")) throw new WorkflowError(403, "forbidden");
 
     return prisma.$transaction(async (tx) => {
         const order = await loadOrder(tx, orderId);
         if( order.status !== "TOKEN_ISSUED") {
-            throw new WorkflowError(409, `cannot hand to runner while orde ris ${order.status}`)
+            throw new WorkflowError(409, `cannot hand to runner while order is ${order.status}`)
         }
 
         const unbagged = order.Order_Lines.filter((l)=> l.bag_number == null).length;
         if(unbagged > 0) {
             throw new WorkflowError(409, `${unbagged} of ${order.Order_Lines.length} items have no bag number`)
         }
+
+        const runner_id = await resolveTarget(tx, user, Role.RUNNER, payload.runnerId);
+
         const updated = await tx.orders.update({
             where: { id: order.id},
-            data: {status: "HANDOVER"},
+            data: {status: "HANDOVER", runner_id},
             include: {Order_Lines: true, Token: { where: { status: "ACTIVE" } } }
         });
-        await logAction(tx, user, "hand_to_runner", order.id, {});
+        await logAction(tx, user, "hand_to_runner", order.id, { runner_id });
         return updated;
     })
 }
 
-export async function handToCashier(user:Actor, orderId: string) {
+export async function handToCashier(user:Actor, orderId: string, payload: { cashierId?: string } = {}) {
     if(!can(user.role, "hand_to_cashier")) throw new WorkflowError(403, "forbidden");
 
     return prisma.$transaction(async (tx) => {
@@ -266,12 +288,16 @@ export async function handToCashier(user:Actor, orderId: string) {
         if(unbagged > 0) {
             throw new WorkflowError(409, `${unbagged} of ${order.Order_Lines.length} items have no bag number`)
         }
+
+        const cashier_id = await resolveTarget(tx, user, Role.CASHIER, payload.cashierId);
+
         const updated = await tx.orders.update({
             where: { id: order.id},
-            data: {status: "READY_FOR_PICKUP"},
+            // ready_at starts the customer-facing waiting timer.
+            data: {status: "READY_FOR_PICKUP", cashier_id, ready_at: new Date()},
             include: {Order_Lines: true, Token: { where: { status: "ACTIVE" } } }
         });
-        await logAction(tx, user, "hand_to_cashier", order.id, {});
+        await logAction(tx, user, "hand_to_cashier", order.id, { cashier_id });
         return updated;
     })
 }
@@ -337,7 +363,14 @@ export async function OverrideStatus(user:Actor, orderId: string, payload: { sta
           const order = await loadOrder(tx, orderId);
           const updated = await tx.orders.update({
               where: { id: order.id },
-              data: { status: target as Status },
+              data: {
+                  status: target as Status,
+                  // Forcing an order to the counter has to start the waiting
+                  // timer too, or the display would show it as 0m forever.
+                  ...(target === Status.READY_FOR_PICKUP && order.ready_at === null
+                      ? { ready_at: new Date() }
+                      : {}),
+              },
               include: { Order_Lines: true, Token: { where: { status: "ACTIVE" } } },
           });
           await logAction(tx, user, "override_status", order.id, { from: order.status, to:

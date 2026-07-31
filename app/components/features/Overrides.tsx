@@ -13,6 +13,7 @@ import {
   type SortKey,
 } from "@/app/components/shared/api";
 import { useDebounced } from "@/app/components/shared/useDebounced";
+import { useActionError } from "@/app/components/shared/useActionError";
 import { useInfiniteScroll } from "@/app/components/shared/useInfiniteScroll";
 import EmptyState from "@/app/components/dashboard/EmptyState";
 import Loader from "@/app/components/dashboard/Loader";
@@ -37,7 +38,7 @@ export default function Overrides() {
   const [bypassing, setBypassing] = useState(false);
   const [bagDrafts, setBagDrafts] = useState<Record<string, string>>({});
   const [lineBusy, setLineBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { error, setActionError, setLoadError, clearLoadError } = useActionError();
   const [message, setMessage] = useState<string | null>(null);
   const [sort, setSort] = useState<SortKey>(statusFirst("PACKAGING_PENDING"));
   const [limit, setLimit] = useState(PAGE_STEP);
@@ -59,7 +60,6 @@ export default function Overrides() {
   }
 
   const loadOrders = useCallback(async () => {
-    setError(null);
     try {
       const page = await fetchOrders({
         q: term,
@@ -70,15 +70,16 @@ export default function Overrides() {
       const data = page.orders;
       setOrders(data);
       setTotal(page.total);
+      clearLoadError();
       setSelectedOrderId((current) =>
         current && data.some((order) => order.order_id === current)
           ? current
           : (data[0]?.order_id ?? null),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load orders");
+      setLoadError(e instanceof Error ? e.message : "Failed to load orders");
     }
-  }, [term, sort, limit]);
+  }, [term, sort, limit, setLoadError, clearLoadError]);
 
   useEffect(() => {
     const id = window.setTimeout(() => {
@@ -117,11 +118,11 @@ export default function Overrides() {
     const raw = draftFor(lineId, current).trim();
     const bagNumber = Number(raw);
     if (!raw || !Number.isInteger(bagNumber) || bagNumber < 1) {
-      setError("Enter a positive bag number");
+      setActionError("Enter a positive bag number");
       return;
     }
     setLineBusy(lineId);
-    setError(null);
+    setActionError(null);
     setMessage(null);
     try {
       await orderAction(selectedOrder!.order_id, "set_bag_number", {
@@ -132,7 +133,7 @@ export default function Overrides() {
       setMessage(`Bag number updated to ${bagNumber}.`);
       await loadOrders();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to update bag number");
+      setActionError(e instanceof Error ? e.message : "Failed to update bag number");
     } finally {
       setLineBusy(null);
     }
@@ -140,7 +141,7 @@ export default function Overrides() {
 
   async function clearBag(lineId: string) {
     setLineBusy(lineId);
-    setError(null);
+    setActionError(null);
     setMessage(null);
     try {
       await orderAction(selectedOrder!.order_id, "set_bag_number", {
@@ -151,7 +152,7 @@ export default function Overrides() {
       setMessage("Bag number cleared.");
       await loadOrders();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to clear bag number");
+      setActionError(e instanceof Error ? e.message : "Failed to clear bag number");
     } finally {
       setLineBusy(null);
     }
@@ -160,11 +161,11 @@ export default function Overrides() {
   async function bypassToCashier() {
     if (!selectedOrder) return;
     if (!allBagged) {
-      setError("Assign a bag number to every line before sending to cashier");
+      setActionError("Assign a bag number to every line before sending to cashier");
       return;
     }
     setBypassing(true);
-    setError(null);
+    setActionError(null);
     setMessage(null);
     try {
       if (selectedOrder.token_number == null) {
@@ -176,7 +177,7 @@ export default function Overrides() {
       setMessage(`${selectedOrder.order_id} sent to cashier.`);
       await loadOrders();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Bypass failed");
+      setActionError(e instanceof Error ? e.message : "Bypass failed");
     } finally {
       setBypassing(false);
     }
@@ -236,7 +237,7 @@ export default function Overrides() {
                     setSelectedOrderId(order.order_id);
                     setBagDrafts({});
                     setMessage(null);
-                    setError(null);
+                    setActionError(null);
                   }}
                   className={`w-full rounded-xl border p-4 text-left transition ${
                     selectedOrderId === order.order_id
