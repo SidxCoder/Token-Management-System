@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   fetchOrders,
   orderAction,
@@ -9,10 +9,13 @@ import {
   type Order,
   type SortKey,
 } from "@/app/components/shared/api";
+import { useActionError } from "@/app/components/shared/useActionError";
 import { useInfiniteScroll } from "@/app/components/shared/useInfiniteScroll";
+import { usePolling } from "@/app/components/shared/usePolling";
 import EmptyState from "@/app/components/dashboard/EmptyState";
 import Loader from "@/app/components/dashboard/Loader";
 import SortSelect from "@/app/components/dashboard/SortSelect";
+import DetailPane from "@/app/components/dashboard/DetailPane";
 import {
   ClipboardCheckIcon,
   ClipboardIcon,
@@ -28,12 +31,14 @@ export default function DeliveryDesk() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tokenInput, setTokenInput] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const { error, setActionError, setLoadError, clearLoadError } = useActionError();
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [sort, setSort] = useState<SortKey>("token");
   const [limit, setLimit] = useState(PAGE_STEP);
   const [total, setTotal] = useState(0);
+  // Phone-only overlay; opens on tap, never from load()'s auto-select.
+  const [detailOpen, setDetailOpen] = useState(false);
 
   // A new sort means a different result set, so the window resets here rather
   // than in an effect — that avoids a cascading render and a wasted fetch at
@@ -44,36 +49,30 @@ export default function DeliveryDesk() {
   }
 
   const load = useCallback(async () => {
-    setError(null);
     try {
       const page = await fetchOrders({
         status: "READY_FOR_PICKUP",
+        mine: true,
         sort,
         limit,
       });
       const data = page.orders;
       setOrders(data);
       setTotal(page.total);
+      clearLoadError();
       setSelectedId((current) =>
         current && data.some((o) => o.order_id === current)
           ? current
           : (data[0]?.order_id ?? null),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load orders");
+      setLoadError(e instanceof Error ? e.message : "Failed to load orders");
     } finally {
       setLoaded(true);
     }
-  }, [sort, limit]);
+  }, [sort, limit, setLoadError, clearLoadError]);
 
-  useEffect(() => {
-    const initial = window.setTimeout(() => void load(), 0);
-    const id = window.setInterval(() => void load(), 4000);
-    return () => {
-      window.clearTimeout(initial);
-      window.clearInterval(id);
-    };
-  }, [load]);
+  usePolling(load, 4000);
 
   const hasMore = orders.length < total;
   const sentinel = useInfiniteScroll(
@@ -90,17 +89,17 @@ export default function DeliveryDesk() {
   async function markDelivered() {
     if (!order) return;
     if (Number(tokenInput.trim()) !== order.token_number) {
-      setError("Enter the matching token number to deliver");
+      setActionError("Enter the matching token number to deliver");
       return;
     }
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       await orderAction(order.order_id, "deliver");
       setTokenInput("");
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Deliver failed");
+      setActionError(e instanceof Error ? e.message : "Deliver failed");
     } finally {
       setBusy(false);
     }
@@ -148,6 +147,7 @@ export default function DeliveryDesk() {
                   key={item.order_id}
                   onClick={() => {
                     setSelectedId(item.order_id);
+                    setDetailOpen(true);
                     setTokenInput("");
                   }}
                   className={`w-full rounded-xl border p-4 text-left transition ${
@@ -181,7 +181,11 @@ export default function DeliveryDesk() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:max-h-full lg:self-start lg:overflow-y-auto">
+        <DetailPane
+          open={detailOpen}
+          title="orders"
+          onClose={() => setDetailOpen(false)}
+        >
           {!order ? (
             <EmptyState
               icon={<ClipboardCheckIcon className="h-9 w-9" />}
@@ -241,7 +245,7 @@ export default function DeliveryDesk() {
               </button>
             </>
           )}
-        </section>
+        </DetailPane>
       </div>
     </div>
   );

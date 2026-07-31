@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   baggedCount,
   fetchOrders,
@@ -13,10 +13,13 @@ import {
   type SortKey,
 } from "@/app/components/shared/api";
 import { useDebounced } from "@/app/components/shared/useDebounced";
+import { useActionError } from "@/app/components/shared/useActionError";
 import { useInfiniteScroll } from "@/app/components/shared/useInfiniteScroll";
+import { usePolling } from "@/app/components/shared/usePolling";
 import EmptyState from "@/app/components/dashboard/EmptyState";
 import Loader from "@/app/components/dashboard/Loader";
 import SortSelect from "@/app/components/dashboard/SortSelect";
+import DetailPane from "@/app/components/dashboard/DetailPane";
 import {
   ClipboardIcon,
   DocumentSearchIcon,
@@ -30,11 +33,14 @@ export default function OrdersBrowser() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Read-only screen: no user actions, so only load errors are possible here.
+  const { error, setLoadError, clearLoadError } = useActionError();
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<SortKey>(statusFirst("PACKAGING_PENDING"));
   const [limit, setLimit] = useState(PAGE_STEP);
   const [total, setTotal] = useState(0);
+  // Phone-only overlay; opens on tap, never from load()'s auto-select.
+  const [detailOpen, setDetailOpen] = useState(false);
 
   const search = useDebounced(query);
 
@@ -52,26 +58,19 @@ export default function OrdersBrowser() {
   }
 
   const load = useCallback(async () => {
-    setError(null);
     try {
       const page = await fetchOrders({ q: search, sort, limit });
       setOrders(page.orders);
       setTotal(page.total);
+      clearLoadError();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load orders");
+      setLoadError(e instanceof Error ? e.message : "Failed to load orders");
     } finally {
       setLoading(false);
     }
-  }, [search, sort, limit]);
+  }, [search, sort, limit, setLoadError, clearLoadError]);
 
-  useEffect(() => {
-    const initial = window.setTimeout(() => void load(), 0);
-    const id = window.setInterval(() => void load(), 4000);
-    return () => {
-      window.clearTimeout(initial);
-      window.clearInterval(id);
-    };
-  }, [load]);
+  usePolling(load, 4000);
 
   const results = orders;
   const selected = orders.find((o) => o.order_id === selectedId) ?? null;
@@ -111,7 +110,10 @@ export default function OrdersBrowser() {
               {results.map((order) => (
                 <button
                   key={order.order_id}
-                  onClick={() => setSelectedId(order.order_id)}
+                  onClick={() => {
+                    setSelectedId(order.order_id);
+                    setDetailOpen(true);
+                  }}
                   className={`flex w-full items-center justify-between rounded-xl border p-4 text-left transition ${
                     selectedId === order.order_id
                       ? "border-blue-500 bg-blue-50"
@@ -145,7 +147,11 @@ export default function OrdersBrowser() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:max-h-full lg:self-start lg:overflow-y-auto">
+        <DetailPane
+          open={detailOpen}
+          title="orders"
+          onClose={() => setDetailOpen(false)}
+        >
           {!selected ? (
             <EmptyState
               icon={<ClipboardIcon className="h-9 w-9" />}
@@ -188,7 +194,7 @@ export default function OrdersBrowser() {
               </div>
             </>
           )}
-        </section>
+        </DetailPane>
       </div>
     </div>
   );

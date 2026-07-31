@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   fetchOrders,
   orderAction,
@@ -12,9 +12,12 @@ import {
   type SortKey,
 } from "@/app/components/shared/api";
 import { useDebounced } from "@/app/components/shared/useDebounced";
+import { useActionError } from "@/app/components/shared/useActionError";
 import { useInfiniteScroll } from "@/app/components/shared/useInfiniteScroll";
+import { usePolling } from "@/app/components/shared/usePolling";
 import Loader from "@/app/components/dashboard/Loader";
 import SortSelect from "@/app/components/dashboard/SortSelect";
+import DetailPane from "@/app/components/dashboard/DetailPane";
 
 const SORT_OPTIONS: SortKey[] = [
   "token",
@@ -32,11 +35,13 @@ export default function CancelToken() {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { error, setActionError, setLoadError, clearLoadError } = useActionError();
   const [message, setMessage] = useState<string | null>(null);
   const [sort, setSort] = useState<SortKey>("token");
   const [limit, setLimit] = useState(PAGE_STEP);
   const [total, setTotal] = useState(0);
+  // Phone-only overlay; opens on tap, never from load()'s auto-select.
+  const [detailOpen, setDetailOpen] = useState(false);
 
   const term = useDebounced(search);
 
@@ -54,7 +59,6 @@ export default function CancelToken() {
   }
 
   const load = useCallback(async () => {
-    setError(null);
     try {
       const page = await fetchOrders({
         q: term,
@@ -66,26 +70,20 @@ export default function CancelToken() {
       const data = page.orders;
       setOrders(data);
       setTotal(page.total);
+      clearLoadError();
       setSelectedId((current) =>
         current && data.some((o) => o.order_id === current)
           ? current
           : (data[0]?.order_id ?? null),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load orders");
+      setLoadError(e instanceof Error ? e.message : "Failed to load orders");
     } finally {
       setLoaded(true);
     }
-  }, [term, sort, limit]);
+  }, [term, sort, limit, setLoadError, clearLoadError]);
 
-  useEffect(() => {
-    const initial = window.setTimeout(() => void load(), 0);
-    const id = window.setInterval(() => void load(), 4000);
-    return () => {
-      window.clearTimeout(initial);
-      window.clearInterval(id);
-    };
-  }, [load]);
+  usePolling(load, 4000);
 
   const filtered = orders;
   const selected = orders.find((o) => o.order_id === selectedId) ?? null;
@@ -99,7 +97,7 @@ export default function CancelToken() {
   async function cancelToken() {
     if (!selected) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
     setMessage(null);
     try {
       await orderAction(selected.order_id, "cancel_token");
@@ -107,7 +105,7 @@ export default function CancelToken() {
       setConfirming(false);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to cancel token");
+      setActionError(e instanceof Error ? e.message : "Failed to cancel token");
     } finally {
       setBusy(false);
     }
@@ -155,6 +153,7 @@ export default function CancelToken() {
                   key={item.order_id}
                   onClick={() => {
                     setSelectedId(item.order_id);
+                    setDetailOpen(true);
                     setConfirming(false);
                     setMessage(null);
                   }}
@@ -192,7 +191,11 @@ export default function CancelToken() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:max-h-full lg:self-start lg:overflow-y-auto">
+        <DetailPane
+          open={detailOpen}
+          title="tokens"
+          onClose={() => setDetailOpen(false)}
+        >
           {!selected ? (
             <p className="py-16 text-center text-sm text-slate-500">
               Select an order to cancel its token.
@@ -253,7 +256,7 @@ export default function CancelToken() {
               )}
             </>
           )}
-        </section>
+        </DetailPane>
       </div>
     </div>
   );

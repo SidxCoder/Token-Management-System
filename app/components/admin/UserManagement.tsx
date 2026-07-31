@@ -16,6 +16,7 @@ type UiUser = {
   display_name: string;
   role: UserRole;
   active: boolean;
+  station_number: number | null;
 };
 
 const roleStyles: Record<UserRole, string> = {
@@ -31,7 +32,11 @@ const emptyUser = {
   username: "",
   password: "",
   role: "runner" as UserRole,
+  station_number: "",
 };
+
+// Only these roles are handed bags, so only they carry a station number.
+const NUMBERED_ROLES: UserRole[] = ["runner", "cashier"];
 
 function mapUser(user: ApiUser): UiUser {
   return {
@@ -40,6 +45,7 @@ function mapUser(user: ApiUser): UiUser {
     display_name: user.display_name,
     role: toUserRole(user.role),
     active: user.active,
+    station_number: user.station_number ?? null,
   };
 }
 
@@ -53,6 +59,8 @@ export default function UserManagement() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<UiUser | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const loadUsers = useCallback(async () => {
     setError(null);
@@ -87,6 +95,29 @@ export default function UserManagement() {
       : users;
   }, [query, users]);
 
+  // The server decides between a real delete and an archive, based on whether
+  // the account has audit or token history — those FKs are ON DELETE RESTRICT.
+  async function confirmDelete() {
+    if (!deleting) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/admin/users?id=${encodeURIComponent(deleting.id)}`,
+        { method: "DELETE" },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Failed to delete user");
+      setNotice(typeof data.message === "string" ? data.message : null);
+      setDeleting(null);
+      await loadUsers();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to delete user");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function openCreate() {
     setEditingId(null);
     setForm(emptyUser);
@@ -101,6 +132,7 @@ export default function UserManagement() {
       username: user.username,
       password: "",
       role: user.role,
+      station_number: user.station_number != null ? String(user.station_number) : "",
     });
     setShowFormPassword(false);
     setShowForm(true);
@@ -117,12 +149,15 @@ export default function UserManagement() {
 
     try {
       if (editingId) {
-        const body: Record<string, string | boolean> = {
+        const body: Record<string, string | boolean | null> = {
           id: editingId,
           display_name,
           role: toApiRole(form.role),
         };
         if (form.password) body.password = form.password;
+        body.station_number = NUMBERED_ROLES.includes(form.role)
+          ? form.station_number.trim()
+          : "";
 
         const res = await fetch("/api/admin/users", {
           method: "PATCH",
@@ -140,6 +175,9 @@ export default function UserManagement() {
             password: form.password,
             display_name,
             role: toApiRole(form.role),
+            station_number: NUMBERED_ROLES.includes(form.role)
+              ? form.station_number.trim()
+              : "",
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -234,6 +272,47 @@ export default function UserManagement() {
           </p>
         ) : null}
 
+        {notice ? (
+          <div className="mb-4 flex items-start justify-between gap-4 rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            <p>{notice}</p>
+            <button
+              onClick={() => setNotice(null)}
+              className="shrink-0 font-semibold text-emerald-700 hover:text-emerald-900"
+            >
+              Dismiss
+            </button>
+          </div>
+        ) : null}
+
+        {deleting ? (
+          <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-4 text-sm">
+            <p className="font-semibold text-rose-900">
+              Delete {deleting.display_name}?
+            </p>
+            <p className="mt-1 text-rose-800">
+              If this account has issued tokens or audit history it will be
+              archived rather than deleted, so the audit trail stays intact.
+              Either way they can no longer sign in.
+            </p>
+            <div className="mt-3 flex gap-3">
+              <button
+                onClick={confirmDelete}
+                disabled={saving}
+                className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-60"
+              >
+                {saving ? "Working…" : "Delete"}
+              </button>
+              <button
+                onClick={() => setDeleting(null)}
+                disabled={saving}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         <label className="relative mb-5 block max-w-md">
           <span className="sr-only">Search users</span>
           <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
@@ -303,6 +382,26 @@ export default function UserManagement() {
                   ))}
                 </select>
               </label>
+              {NUMBERED_ROLES.includes(form.role) ? (
+                <label className="block text-sm font-medium text-slate-700">
+                  Station number
+                  <input
+                    type="number"
+                    min={1}
+                    value={form.station_number}
+                    onChange={(event) =>
+                      setForm({ ...form, station_number: event.target.value })
+                    }
+                    placeholder="e.g. 2"
+                    className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 font-normal text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                  />
+                  <span className="mt-1 block text-xs font-normal text-slate-500">
+                    Shown as &ldquo;{ROLE_CONFIG[form.role].label}{" "}
+                    {form.station_number || "N"}&rdquo; when handing over. Must be
+                    unique within the role.
+                  </span>
+                </label>
+              ) : null}
             </div>
             <button
               type="submit"
@@ -347,6 +446,11 @@ export default function UserManagement() {
                     </td>
                     <td className="px-5 py-4 font-mono text-xs text-slate-600">
                       {user.username}
+                      {user.station_number != null ? (
+                        <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 font-sans text-xs font-semibold text-slate-700">
+                          #{user.station_number}
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-5 py-4">
                       <select
@@ -376,12 +480,18 @@ export default function UserManagement() {
                       </button>
                     </td>
                     <td className="px-5 py-4">
-                      <div className="flex justify-end">
+                      <div className="flex items-center justify-end gap-4">
                         <button
                           onClick={() => openEdit(user)}
                           className="font-semibold text-blue-600 hover:text-blue-800"
                         >
                           Edit
+                        </button>
+                        <button
+                          onClick={() => setDeleting(user)}
+                          className="font-semibold text-rose-600 hover:text-rose-800"
+                        >
+                          Delete
                         </button>
                       </div>
                     </td>

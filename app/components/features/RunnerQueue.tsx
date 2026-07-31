@@ -8,15 +8,21 @@ import {
   statusLabel,
   statusFirst,
   statusSorts,
+  fetchStaff,
+  staffLabel,
   PAGE_STEP,
   type Order,
+  type Staff,
   type OrderStatus,
   type SortKey,
 } from "@/app/components/shared/api";
+import { useActionError } from "@/app/components/shared/useActionError";
 import { useInfiniteScroll } from "@/app/components/shared/useInfiniteScroll";
+import { usePolling } from "@/app/components/shared/usePolling";
 import EmptyState from "@/app/components/dashboard/EmptyState";
 import Loader from "@/app/components/dashboard/Loader";
 import SortSelect from "@/app/components/dashboard/SortSelect";
+import DetailPane from "@/app/components/dashboard/DetailPane";
 import {
   BagIcon,
   ClipboardListIcon,
@@ -37,12 +43,21 @@ const SORT_OPTIONS: SortKey[] = [
 export default function RunnerQueue() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { error, setActionError, setLoadError, clearLoadError } = useActionError();
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [sort, setSort] = useState<SortKey>(statusFirst("TOKEN_ISSUED"));
   const [limit, setLimit] = useState(PAGE_STEP);
   const [total, setTotal] = useState(0);
+  // Phone-only overlay; opens on tap, never from load()'s auto-select.
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [cashiers, setCashiers] = useState<Staff[]>([]);
+  const [cashierId, setCashierId] = useState("");
+
+  // Cashier list changes rarely, so it is fetched once rather than on the poll.
+  useEffect(() => {
+    void fetchStaff("CASHIER").then(setCashiers);
+  }, []);
 
   // A new sort means a different result set, so the window resets here rather
   // than in an effect — that avoids a cascading render and a wasted fetch at
@@ -53,32 +68,25 @@ export default function RunnerQueue() {
   }
 
   const load = useCallback(async () => {
-    setError(null);
     try {
-      const page = await fetchOrders({ status: RUNNER_STATUSES, sort, limit });
+      const page = await fetchOrders({ status: RUNNER_STATUSES, sort, limit, mine: true });
       const relevant = page.orders;
       setOrders(relevant);
       setTotal(page.total);
+      clearLoadError();
       setSelectedId((current) =>
         current && relevant.some((o) => o.order_id === current)
           ? current
           : (relevant[0]?.order_id ?? null),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load orders");
+      setLoadError(e instanceof Error ? e.message : "Failed to load orders");
     } finally {
       setLoaded(true);
     }
-  }, [sort, limit]);
+  }, [sort, limit, setLoadError, clearLoadError]);
 
-  useEffect(() => {
-    const initial = window.setTimeout(() => void load(), 0);
-    const id = window.setInterval(() => void load(), 4000);
-    return () => {
-      window.clearTimeout(initial);
-      window.clearInterval(id);
-    };
-  }, [load]);
+  usePolling(load, 4000);
 
   const order = orders.find((o) => o.order_id === selectedId) ?? null;
 
@@ -99,12 +107,12 @@ export default function RunnerQueue() {
   async function collectBag() {
     if (!order) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       await orderAction(order.order_id, "hand_to_runner");
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Collect failed");
+      setActionError(e instanceof Error ? e.message : "Collect failed");
     } finally {
       setBusy(false);
     }
@@ -112,13 +120,17 @@ export default function RunnerQueue() {
 
   async function handToCashier() {
     if (!order) return;
+    if (!cashierId) {
+      setActionError("Pick which cashier counter is taking this bag");
+      return;
+    }
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
-      await orderAction(order.order_id, "hand_to_cashier");
+      await orderAction(order.order_id, "hand_to_cashier", { cashierId });
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Handover failed");
+      setActionError(e instanceof Error ? e.message : "Handover failed");
     } finally {
       setBusy(false);
     }
@@ -161,7 +173,10 @@ export default function RunnerQueue() {
               {orders.map((item) => (
                 <button
                   key={item.order_id}
-                  onClick={() => setSelectedId(item.order_id)}
+                  onClick={() => {
+                    setSelectedId(item.order_id);
+                    setDetailOpen(true);
+                  }}
                   className={`w-full rounded-xl border p-4 text-left transition ${
                     item.order_id === selectedId
                       ? "border-blue-500 bg-blue-50"
@@ -196,7 +211,11 @@ export default function RunnerQueue() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:max-h-full lg:self-start lg:overflow-y-auto">
+        <DetailPane
+          open={detailOpen}
+          title="tokens"
+          onClose={() => setDetailOpen(false)}
+        >
           {!order ? (
             <EmptyState
               icon={<TicketIcon className="h-9 w-9" />}
@@ -237,7 +256,24 @@ export default function RunnerQueue() {
                 ))}
               </div>
 
-              <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+              <label className="mt-6 block text-sm font-medium text-slate-700">
+                Cashier counter
+                <select
+                  value={cashierId}
+                  onChange={(event) => setCashierId(event.target.value)}
+                  disabled={order.status !== "HANDOVER" || busy}
+                  className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400"
+                >
+                  <option value="">Select a cashier…</option>
+                  {cashiers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {staffLabel("Cashier", c)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="mt-3 flex flex-col gap-3 sm:flex-row">
                 <button
                   onClick={collectBag}
                   disabled={order.status !== "TOKEN_ISSUED" || busy}
@@ -247,15 +283,20 @@ export default function RunnerQueue() {
                 </button>
                 <button
                   onClick={handToCashier}
-                  disabled={order.status !== "HANDOVER" || busy}
+                  disabled={order.status !== "HANDOVER" || busy || !cashierId}
                   className="flex-1 rounded-xl border border-blue-600 px-4 py-3 text-sm font-semibold text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
                 >
                   Hand over to cashier
                 </button>
               </div>
+              {order.status === "HANDOVER" && cashiers.length === 0 ? (
+                <p className="mt-3 text-center text-xs text-slate-400">
+                  No active cashiers. Add one under Users.
+                </p>
+              ) : null}
             </>
           )}
-        </section>
+        </DetailPane>
       </div>
     </div>
   );

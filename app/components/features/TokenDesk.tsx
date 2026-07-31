@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import {
   fetchOrders,
   orderAction,
@@ -13,10 +13,13 @@ import {
   type SortKey,
 } from "@/app/components/shared/api";
 import { useDebounced } from "@/app/components/shared/useDebounced";
+import { useActionError } from "@/app/components/shared/useActionError";
 import { useInfiniteScroll } from "@/app/components/shared/useInfiniteScroll";
+import { usePolling } from "@/app/components/shared/usePolling";
 import EmptyState from "@/app/components/dashboard/EmptyState";
 import Loader from "@/app/components/dashboard/Loader";
 import SortSelect from "@/app/components/dashboard/SortSelect";
+import DetailPane from "@/app/components/dashboard/DetailPane";
 import {
   ClipboardListIcon,
   DocumentSearchIcon,
@@ -35,7 +38,7 @@ export default function TokenDesk() {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [view, setView] = useState<"search" | "issued">("search");
-  const [error, setError] = useState<string | null>(null);
+  const { error, setActionError, setLoadError, clearLoadError } = useActionError();
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [issued, setIssued] = useState<Order[]>([]);
@@ -46,6 +49,9 @@ export default function TokenDesk() {
   const [issuedLimit, setIssuedLimit] = useState(PAGE_STEP);
   const [total, setTotal] = useState(0);
   const [issuedTotal, setIssuedTotal] = useState(0);
+  // Phone-only: the detail overlay opens on tap, never from the auto-select
+  // that load() performs, or it would reopen itself after every poll.
+  const [detailOpen, setDetailOpen] = useState(false);
 
   const search = useDebounced(query);
 
@@ -70,7 +76,6 @@ export default function TokenDesk() {
   // orders that already carry a token. Both filters are server-side so neither
   // list is limited to whatever happened to land on the first page.
   const load = useCallback(async () => {
-    setError(null);
     try {
       const [all, withToken] = await Promise.all([
         fetchOrders({ q: search, sort, limit }),
@@ -78,23 +83,17 @@ export default function TokenDesk() {
       ]);
       setOrders(all.orders);
       setTotal(all.total);
+      clearLoadError();
       setIssued(withToken.orders);
       setIssuedTotal(withToken.total);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load orders");
+      setLoadError(e instanceof Error ? e.message : "Failed to load orders");
     } finally {
       setLoaded(true);
     }
-  }, [search, sort, issuedSort, limit, issuedLimit]);
+  }, [search, sort, issuedSort, limit, issuedLimit, setLoadError, clearLoadError]);
 
-  useEffect(() => {
-    const initial = window.setTimeout(() => void load(), 0);
-    const id = window.setInterval(() => void load(), 4000);
-    return () => {
-      window.clearTimeout(initial);
-      window.clearInterval(id);
-    };
-  }, [load]);
+  usePolling(load, 4000);
 
   const results = orders;
 
@@ -117,13 +116,13 @@ export default function TokenDesk() {
   async function issueToken() {
     if (!selected || !canIssue) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       await orderAction(selected.order_id, "issue_token");
       await load();
       setView("issued");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to issue token");
+      setActionError(e instanceof Error ? e.message : "Failed to issue token");
     } finally {
       setBusy(false);
     }
@@ -189,7 +188,10 @@ export default function TokenDesk() {
                 {results.map((order) => (
                   <button
                     key={order.order_id}
-                    onClick={() => setSelectedId(order.order_id)}
+                    onClick={() => {
+                      setSelectedId(order.order_id);
+                      setDetailOpen(true);
+                    }}
                     className={`flex w-full items-center justify-between rounded-xl border p-4 text-left transition ${
                       selectedId === order.order_id
                         ? "border-blue-500 bg-blue-50"
@@ -223,7 +225,11 @@ export default function TokenDesk() {
             )}
           </section>
 
-          <aside className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:max-h-full lg:self-start lg:overflow-y-auto">
+          <DetailPane
+            open={detailOpen}
+            title="orders"
+            onClose={() => setDetailOpen(false)}
+          >
             {!selected ? (
               <EmptyState
                 icon={<ClipboardListIcon className="h-9 w-9" />}
@@ -264,7 +270,7 @@ export default function TokenDesk() {
                 </button>
               </>
             )}
-          </aside>
+          </DetailPane>
         </div>
       ) : (
         <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">

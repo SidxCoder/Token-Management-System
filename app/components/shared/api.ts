@@ -26,6 +26,9 @@ export type Order = {
   token_date?: string | null;
   uploaded_at?: string;
   updated_at?: string;
+  ready_at?: string | null;
+  runner_id?: string | null;
+  cashier_id?: string | null;
   number_of_items: number;
   bagged_count?: number;
   Order_Lines: OrderLine[];
@@ -94,7 +97,28 @@ export type ApiUser = {
   display_name: string;
   role: string;
   active: boolean;
+  station_number?: number | null;
 };
+
+// A runner or cashier that a bag can be handed to.
+export type Staff = {
+  id: string;
+  display_name: string;
+  station_number: number | null;
+};
+
+export function staffLabel(role: "Runner" | "Cashier", s: Staff) {
+  return s.station_number != null
+    ? `${role} ${s.station_number} — ${s.display_name}`
+    : s.display_name;
+}
+
+export async function fetchStaff(role: "RUNNER" | "CASHIER"): Promise<Staff[]> {
+  const res = await fetch(`/api/staff?role=${role}`);
+  const data = await res.json().catch(() => []);
+  if (!res.ok) return [];
+  return data as Staff[];
+}
 
 export function toUserRole(role: string): UserRole {
   return role.toLowerCase() as UserRole;
@@ -115,6 +139,9 @@ export async function fetchOrders(params?: {
   hasToken?: boolean;
   sort?: SortKey;
   limit?: number;
+  // Scope the queue to the signed-in runner/cashier. The server derives the
+  // filter from the session role, so this cannot be used to read someone else's.
+  mine?: boolean;
 }): Promise<OrderPage> {
   const sp = new URLSearchParams();
   if (params?.q) sp.set("q", params.q);
@@ -125,6 +152,7 @@ export async function fetchOrders(params?: {
   if (params?.hasToken) sp.set("hasToken", "1");
   if (params?.sort) sp.set("sort", params.sort);
   if (params?.limit) sp.set("pageSize", String(params.limit));
+  if (params?.mine) sp.set("mine", "1");
   const qs = sp.toString();
   const res = await fetch(`/api/orders${qs ? `?${qs}` : ""}`);
   const data = await res.json().catch(() => ({}));
