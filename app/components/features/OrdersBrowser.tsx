@@ -29,16 +29,26 @@ import {
 const SORT_OPTIONS: SortKey[] = [...statusSorts(ALL_STATUSES), "name"];
 
 // Read-only order search available to every role (search_orders permission).
-export default function OrdersBrowser() {
-  const [orders, setOrders] = useState<Order[]>([]);
+export default function OrdersBrowser({
+  initialOrders = [],
+  initialTotal = 0,
+}: {
+  // Server-rendered first screenful. Without it the page paints, then the
+  // browser makes a second cross-region round trip before anything shows.
+  initialOrders?: Order[];
+  initialTotal?: number;
+} = {}) {
+  const [orders, setOrders] = useState<Order[]>(initialOrders);
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    initialOrders[0]?.order_id ?? null,
+  );
   // Read-only screen: no user actions, so only load errors are possible here.
   const { error, setLoadError, clearLoadError } = useActionError();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(initialOrders.length === 0);
   const [sort, setSort] = useState<SortKey>(statusFirst("PACKAGING_PENDING"));
   const [limit, setLimit] = useState(PAGE_STEP);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState(initialTotal);
   // Phone-only overlay; opens on tap, never from load()'s auto-select.
   const [detailOpen, setDetailOpen] = useState(false);
 
@@ -70,7 +80,7 @@ export default function OrdersBrowser() {
     }
   }, [search, sort, limit, setLoadError, clearLoadError]);
 
-  usePolling(load, 4000);
+  usePolling(load, 4000, initialOrders.length > 0);
 
   const results = orders;
   const selected = orders.find((o) => o.order_id === selectedId) ?? null;
@@ -148,9 +158,10 @@ export default function OrdersBrowser() {
         </section>
 
         <DetailPane
-          open={detailOpen}
+          open={detailOpen && !!selected}
           title="orders"
           onClose={() => setDetailOpen(false)}
+          error={error}
         >
           {!selected ? (
             <EmptyState

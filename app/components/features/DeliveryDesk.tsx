@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   fetchOrders,
   orderAction,
@@ -27,18 +27,29 @@ import {
 const SORT_OPTIONS: SortKey[] = ["token", "token_desc", "name"];
 
 // Cashier delivery desk: verify token and mark delivered (deliver permission).
-export default function DeliveryDesk() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+export default function DeliveryDesk({
+  initialOrders = [],
+  initialTotal = 0,
+}: {
+  // Server-rendered first screenful. Without it the page paints, then the
+  // browser makes a second cross-region round trip before anything shows.
+  initialOrders?: Order[];
+  initialTotal?: number;
+} = {}) {
+  const [orders, setOrders] = useState<Order[]>(initialOrders);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    initialOrders[0]?.order_id ?? null,
+  );
   const [tokenInput, setTokenInput] = useState("");
   const { error, setActionError, setLoadError, clearLoadError } = useActionError();
   const [busy, setBusy] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(initialOrders.length > 0);
   const [sort, setSort] = useState<SortKey>("token");
   const [limit, setLimit] = useState(PAGE_STEP);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState(initialTotal);
   // Phone-only overlay; opens on tap, never from load()'s auto-select.
   const [detailOpen, setDetailOpen] = useState(false);
+  const autoSelected = useRef(initialOrders.length > 0);
 
   // A new sort means a different result set, so the window resets here rather
   // than in an effect — that avoids a cascading render and a wasted fetch at
@@ -60,11 +71,17 @@ export default function DeliveryDesk() {
       setOrders(data);
       setTotal(page.total);
       clearLoadError();
-      setSelectedId((current) =>
-        current && data.some((o) => o.order_id === current)
-          ? current
-          : (data[0]?.order_id ?? null),
-      );
+      // Only auto-select on the very first load. If the selected order later
+      // leaves the queue (handed over, delivered, filtered out, or pushed past
+      // the loaded window), clear the selection instead of silently jumping to
+      // another order — otherwise the action buttons retarget under the user
+      // and act on an order they never chose.
+      setSelectedId((current) => {
+        if (current && data.some((o) => o.order_id === current)) return current;
+        if (current || autoSelected.current) return null;
+        autoSelected.current = true;
+        return data[0]?.order_id ?? null;
+      });
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Failed to load orders");
     } finally {
@@ -72,7 +89,7 @@ export default function DeliveryDesk() {
     }
   }, [sort, limit, setLoadError, clearLoadError]);
 
-  usePolling(load, 4000);
+  usePolling(load, 4000, initialOrders.length > 0);
 
   const hasMore = orders.length < total;
   const sentinel = useInfiniteScroll(
@@ -182,9 +199,10 @@ export default function DeliveryDesk() {
         </section>
 
         <DetailPane
-          open={detailOpen}
+          open={detailOpen && !!order}
           title="orders"
           onClose={() => setDetailOpen(false)}
+          error={error}
         >
           {!order ? (
             <EmptyState

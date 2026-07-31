@@ -33,22 +33,35 @@ const SEARCH_SORTS: SortKey[] = [...statusSorts(ALL_STATUSES), "name"];
 const ISSUED_SORTS: SortKey[] = ["token_desc", "token", "name"];
 
 // Token issuing desk (issue_token permission).
-export default function TokenDesk() {
-  const [orders, setOrders] = useState<Order[]>([]);
+export default function TokenDesk({
+  initialOrders = [],
+  initialTotal = 0,
+  initialIssued = [],
+  initialIssuedTotal = 0,
+}: {
+  // Both tabs are server-rendered so neither costs a round trip after mount.
+  initialOrders?: Order[];
+  initialTotal?: number;
+  initialIssued?: Order[];
+  initialIssuedTotal?: number;
+} = {}) {
+  const [orders, setOrders] = useState<Order[]>(initialOrders);
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    initialOrders[0]?.order_id ?? null,
+  );
   const [view, setView] = useState<"search" | "issued">("search");
   const { error, setActionError, setLoadError, clearLoadError } = useActionError();
   const [busy, setBusy] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const [issued, setIssued] = useState<Order[]>([]);
+  const [loaded, setLoaded] = useState(initialOrders.length > 0);
+  const [issued, setIssued] = useState<Order[]>(initialIssued);
   const [sort, setSort] = useState<SortKey>(statusFirst("PACKAGED"));
   const [issuedSort, setIssuedSort] = useState<SortKey>("token_desc");
   // The two tabs scroll independently, so each keeps its own window.
   const [limit, setLimit] = useState(PAGE_STEP);
   const [issuedLimit, setIssuedLimit] = useState(PAGE_STEP);
-  const [total, setTotal] = useState(0);
-  const [issuedTotal, setIssuedTotal] = useState(0);
+  const [total, setTotal] = useState(initialTotal);
+  const [issuedTotal, setIssuedTotal] = useState(initialIssuedTotal);
   // Phone-only: the detail overlay opens on tap, never from the auto-select
   // that load() performs, or it would reopen itself after every poll.
   const [detailOpen, setDetailOpen] = useState(false);
@@ -93,7 +106,7 @@ export default function TokenDesk() {
     }
   }, [search, sort, issuedSort, limit, issuedLimit, setLoadError, clearLoadError]);
 
-  usePolling(load, 4000);
+  usePolling(load, 4000, initialOrders.length > 0);
 
   const results = orders;
 
@@ -226,9 +239,10 @@ export default function TokenDesk() {
           </section>
 
           <DetailPane
-            open={detailOpen}
+            open={detailOpen && !!selected}
             title="orders"
             onClose={() => setDetailOpen(false)}
+            error={error}
           >
             {!selected ? (
               <EmptyState

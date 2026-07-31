@@ -13,12 +13,17 @@ export default function DetailPane({
   open,
   title,
   onClose,
+  error,
   className = "",
   children,
 }: {
   open: boolean;
   title: string;
   onClose: () => void;
+  // The page-level error banner sits in normal flow, so the fixed overlay
+  // covers it on phones and a failed action looks like nothing happened.
+  // Repeating it inside the overlay is the only way it can be seen there.
+  error?: string | null;
   className?: string;
   children: React.ReactNode;
 }) {
@@ -72,6 +77,11 @@ export default function DetailPane({
         </svg>
         Back to {title}
       </button>
+      {error ? (
+        <p className="mb-4 rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700 lg:hidden">
+          {error}
+        </p>
+      ) : null}
       {children}
     </section>
   );
