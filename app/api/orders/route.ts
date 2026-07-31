@@ -43,6 +43,8 @@ export async function GET(req: NextRequest) {
         // Derived from the session role, never trusted from the client, so a
         // runner cannot ask for another runner's queue.
         mine: sp.get("mine") === "1",
+        linesHandedOver:
+            sp.get("lines") === null ? undefined : sp.get("lines") === "1",
         role: user.role,
         userId: user.id,
     });

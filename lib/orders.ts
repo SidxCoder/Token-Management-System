@@ -249,6 +249,51 @@ async function resolveTarget(tx: Tx, actor: Actor, role: Role, targetId?: string
     return target.id;
 }
 
+// Packager step: route the order to a named runner and release the bagged lines
+// to them. The status does NOT advance here — the order sits in that runner's
+// "ready to collect" list until they physically take it. Unbagged lines stay
+// behind in packing, so an order can be partially handed over.
+export async function assignRunner(user:Actor, orderId: string, payload: { runnerId?: string } = {}) {
+    if(!can(user.role, "hand_to_runner")) throw new WorkflowError(403, "forbidden");
+
+    return prisma.$transaction(async (tx) => {
+        const order = await loadOrder(tx, orderId);
+        if( order.status !== "TOKEN_ISSUED") {
+            throw new WorkflowError(409, `cannot assign a runner while order is ${order.status}`)
+        }
+
+        const ready = order.Order_Lines.filter((l) => l.bag_number !== null && !l.handed_over);
+        if (ready.length === 0) {
+            const pending = order.Order_Lines.filter((l) => !l.handed_over).length;
+            throw new WorkflowError(
+                409,
+                pending === 0
+                    ? "every item on this order has already been handed over"
+                    : `no bagged items to hand over (${pending} still need a bag number)`,
+            );
+        }
+
+        const runner_id = await resolveTarget(tx, user, Role.RUNNER, payload.runnerId);
+
+        await tx.order_Lines.updateMany({
+            where: { id: { in: ready.map((l) => l.id) } },
+            data: { handed_over: true },
+        });
+
+        const updated = await tx.orders.update({
+            where: { id: order.id},
+            data: { runner_id },
+            include: {Order_Lines: true, Token: { where: { status: "ACTIVE" } } }
+        });
+        const remaining = order.Order_Lines.length - order.Order_Lines.filter((l) => l.handed_over).length - ready.length;
+        await logAction(tx, user, "assign_runner", order.id, {
+            runner_id, items: ready.length, remaining,
+        });
+        return updated;
+    })
+}
+
+// Runner step: the runner physically takes what has been released to them.
 export async function handToRunner(user:Actor, orderId: string, payload: { runnerId?: string } = {}) {
     if(!can(user.role, "hand_to_runner")) throw new WorkflowError(403, "forbidden");
 
@@ -258,19 +303,23 @@ export async function handToRunner(user:Actor, orderId: string, payload: { runne
             throw new WorkflowError(409, `cannot hand to runner while order is ${order.status}`)
         }
 
-        const unbagged = order.Order_Lines.filter((l)=> l.bag_number == null).length;
-        if(unbagged > 0) {
-            throw new WorkflowError(409, `${unbagged} of ${order.Order_Lines.length} items have no bag number`)
+        const collected = order.Order_Lines.filter((l) => l.handed_over).length;
+        if (collected === 0) {
+            throw new WorkflowError(409, "nothing has been released to a runner for this order yet");
         }
 
-        const runner_id = await resolveTarget(tx, user, Role.RUNNER, payload.runnerId);
+        // An admin collecting on someone's behalf keeps the existing assignment;
+        // a runner collecting an unassigned order claims it.
+        const runner_id =
+            payload.runnerId ?? order.runner_id ??
+            (await resolveTarget(tx, user, Role.RUNNER, undefined));
 
         const updated = await tx.orders.update({
             where: { id: order.id},
             data: {status: "HANDOVER", runner_id},
             include: {Order_Lines: true, Token: { where: { status: "ACTIVE" } } }
         });
-        await logAction(tx, user, "hand_to_runner", order.id, { runner_id });
+        await logAction(tx, user, "hand_to_runner", order.id, { runner_id, items: collected });
         return updated;
     })
 }
@@ -284,9 +333,11 @@ export async function handToCashier(user:Actor, orderId: string, payload: { cash
             throw new WorkflowError(409, `cannot hand to cashier while order is ${order.status}`)
         }
 
-        const unbagged = order.Order_Lines.filter((l)=> l.bag_number == null).length;
-        if(unbagged > 0) {
-            throw new WorkflowError(409, `${unbagged} of ${order.Order_Lines.length} items have no bag number`)
+        // Only what the runner is actually carrying needs to be bagged — lines
+        // left behind in packing follow on a later handover.
+        const carrying = order.Order_Lines.filter((l) => l.handed_over);
+        if (carrying.length === 0) {
+            throw new WorkflowError(409, "this order has no items with the runner");
         }
 
         const cashier_id = await resolveTarget(tx, user, Role.CASHIER, payload.cashierId);
@@ -325,6 +376,56 @@ export async function deliver(user:Actor, orderId: string){
     })
 }
 
+
+// Cashier step: the customer never collected. Send everything back to packing —
+// the token is cancelled (it was called and not answered, so it must not stay on
+// the display), the runner/cashier routing is cleared, and every line returns to
+// the packing queue so a packager can restock or re-bag it.
+export async function returnToPackager(user:Actor, orderId: string, payload: { reason?: string } = {}) {
+    if (!can(user.role, "return_order")) throw new WorkflowError(403, "forbidden");
+
+    const reason = (payload.reason ?? "").trim();
+
+    return prisma.$transaction(async (tx) => {
+        const order = await loadOrder(tx, orderId);
+        if (order.status !== "READY_FOR_PICKUP" && order.status !== "HANDOVER") {
+            throw new WorkflowError(409, `cannot return an order that is ${order.status}`);
+        }
+
+        const active = order.Token.find((t) => t.status === "ACTIVE");
+        if (active) {
+            await tx.tokens.update({
+                where: { id: active.id },
+                data: { status: "CANCELLED", cancelled_by: user.id, cancelled_at: new Date() },
+            });
+        }
+
+        await tx.order_Lines.updateMany({
+            where: { order_ref_id: order.id },
+            data: { handed_over: false },
+        });
+
+        const status = order.Order_Lines.every((l) => l.bag_number !== null)
+            ? "PACKAGED" : "PACKAGING_PENDING";
+
+        const updated = await tx.orders.update({
+            where: { id: order.id },
+            data: {
+                status,
+                token_number: null,
+                token_date: null,
+                ready_at: null,
+                runner_id: null,
+                cashier_id: null,
+            },
+            include: { Order_Lines: true, Token: { where: { status: "ACTIVE" } } },
+        });
+        await logAction(tx, user, "return_order", order.id, {
+            from: order.status, to: status, token: active?.id ?? null, reason: reason || null,
+        });
+        return updated;
+    });
+}
 
 export async function cancelOrder(user:Actor, orderId: string){
     if (!can(user.role, "cancel_token")) throw new WorkflowError(403, "forbidden");

@@ -86,8 +86,10 @@ export default function Overrides({
       // another order — otherwise the action buttons retarget under the user
       // and act on an order they never chose.
       setSelectedOrderId((current) => {
-        if (current && data.some((order) => order.order_id === current)) return current;
-        if (current || autoSelected.current) return null;
+        // Never retarget and never clear: once the user picks an order it stays
+        // picked, even if it leaves this queue. Auto-select happens once.
+        if (current) return current;
+        if (autoSelected.current) return null;
         autoSelected.current = true;
         return data[0]?.order_id ?? null;
       });

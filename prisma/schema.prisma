@@ -91,10 +91,15 @@ enum Status {
 model Order_Lines {
   id String @id @default(uuid())
   order_ref_id String
-  product_name String 
-  bag_number Int? 
+  product_name String
+  bag_number Int?
   sku_code String?
   sku_description String?
+  // Partial handover: a packager can send the bagged lines to the runner and
+  // keep the rest in packing, so an order can straddle two stages. The order's
+  // own `status` tracks the furthest stage reached; which lines have physically
+  // moved is recorded here.
+  handed_over Boolean @default(false)
   order_ref Orders @relation(fields: [order_ref_id], references: [id])
 }
 

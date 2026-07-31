@@ -7,6 +7,7 @@ type DisplayOrder = {
   token: number | null;
   order: string;
   readyAt: string;
+  counter: string | null;
 };
 
 const STORE_NAME = "Samsung BKC";
@@ -104,7 +105,12 @@ export default function CustomerDisplayPage() {
                 <p className="mt-3 text-7xl font-black tracking-tight text-white sm:text-8xl">
                   {String(order.token).padStart(2, "0")}
                 </p>
-                <p className="mt-6 text-lg text-slate-400">{order.order}</p>
+                {order.counter ? (
+                  <p className="mt-4 text-3xl font-bold tracking-tight text-emerald-300 sm:text-4xl">
+                    {order.counter}
+                  </p>
+                ) : null}
+                <p className="mt-4 text-lg text-slate-400">{order.order}</p>
                 <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
                   <span className="inline-block rounded-full bg-blue-500/15 px-4 py-2 text-sm font-semibold text-blue-300">
                     Ready for Pickup
@@ -122,7 +128,7 @@ export default function CustomerDisplayPage() {
       </main>
 
       <footer className="border-t border-white/10 px-8 py-4 text-center text-sm text-slate-500">
-        Please proceed to the pickup counter when your token appears
+        Please proceed to the counter shown next to your token
       </footer>
     </div>
   );

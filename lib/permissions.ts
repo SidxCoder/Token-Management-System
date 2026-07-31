@@ -13,6 +13,8 @@ export const PERMISSIONS = {
   hand_to_runner: [Role.PACKAGER, Role.RUNNER, Role.ADMIN],
   hand_to_cashier: [Role.RUNNER, Role.ADMIN],
   deliver: [Role.CASHIER, Role.ADMIN],
+  // Uncollected order goes back to packing.
+  return_order: [Role.CASHIER, Role.ADMIN],
   cancel_token: [Role.ADMIN],
   override_status: [Role.ADMIN],
   edit_fields: [Role.ADMIN],
