@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchOrders,
   orderAction,
@@ -30,11 +30,19 @@ const SORT_OPTIONS: SortKey[] = [...statusSorts(UNDELIVERED_STATUSES), "name"];
 // READY_FOR_PICKUP, skipping the runner step. Bag edits use set_bag_number,
 // which lets admins change or clear an already-assigned bag; the bypass uses
 // override_status. Both are admin-only permissions.
-export default function Overrides() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+export default function Overrides({
+  initialOrders = [],
+  initialTotal = 0,
+}: {
+  initialOrders?: Order[];
+  initialTotal?: number;
+} = {}) {
+  const [orders, setOrders] = useState<Order[]>(initialOrders);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(
+    initialOrders[0]?.order_id ?? null,
+  );
   const [search, setSearch] = useState("");
-  const [loadingOrders, setLoadingOrders] = useState(true);
+  const [loadingOrders, setLoadingOrders] = useState(initialOrders.length === 0);
   const [bypassing, setBypassing] = useState(false);
   const [bagDrafts, setBagDrafts] = useState<Record<string, string>>({});
   const [lineBusy, setLineBusy] = useState<string | null>(null);
@@ -42,7 +50,8 @@ export default function Overrides() {
   const [message, setMessage] = useState<string | null>(null);
   const [sort, setSort] = useState<SortKey>(statusFirst("PACKAGING_PENDING"));
   const [limit, setLimit] = useState(PAGE_STEP);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState(initialTotal);
+  const autoSelected = useRef(initialOrders.length > 0);
 
   const term = useDebounced(search);
 
@@ -71,11 +80,17 @@ export default function Overrides() {
       setOrders(data);
       setTotal(page.total);
       clearLoadError();
-      setSelectedOrderId((current) =>
-        current && data.some((order) => order.order_id === current)
-          ? current
-          : (data[0]?.order_id ?? null),
-      );
+      // Only auto-select on the very first load. If the selected order later
+      // leaves the queue (handed over, delivered, filtered out, or pushed past
+      // the loaded window), clear the selection instead of silently jumping to
+      // another order — otherwise the action buttons retarget under the user
+      // and act on an order they never chose.
+      setSelectedOrderId((current) => {
+        if (current && data.some((order) => order.order_id === current)) return current;
+        if (current || autoSelected.current) return null;
+        autoSelected.current = true;
+        return data[0]?.order_id ?? null;
+      });
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Failed to load orders");
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   baggedCount,
   fetchOrders,
@@ -13,9 +13,9 @@ import {
   PAGE_STEP,
   type Order,
   type Staff,
-  type OrderStatus,
   type SortKey,
 } from "@/app/components/shared/api";
+import { RUNNER_STATUSES } from "@/app/components/shared/queries";
 import { useActionError } from "@/app/components/shared/useActionError";
 import { useInfiniteScroll } from "@/app/components/shared/useInfiniteScroll";
 import { usePolling } from "@/app/components/shared/usePolling";
@@ -30,8 +30,6 @@ import {
   TicketIcon,
 } from "@/app/components/dashboard/icons";
 
-const RUNNER_STATUSES: OrderStatus[] = ["TOKEN_ISSUED", "HANDOVER"];
-
 const SORT_OPTIONS: SortKey[] = [
   ...statusSorts(RUNNER_STATUSES),
   "token",
@@ -40,17 +38,28 @@ const SORT_OPTIONS: SortKey[] = [
 ];
 
 // Runner handovers: collect from packager, hand to cashier (hand_to_cashier).
-export default function RunnerQueue() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+export default function RunnerQueue({
+  initialOrders = [],
+  initialTotal = 0,
+}: {
+  // Server-rendered first screenful. Without it the page paints, then the
+  // browser makes a second cross-region round trip before anything shows.
+  initialOrders?: Order[];
+  initialTotal?: number;
+} = {}) {
+  const [orders, setOrders] = useState<Order[]>(initialOrders);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    initialOrders[0]?.order_id ?? null,
+  );
   const { error, setActionError, setLoadError, clearLoadError } = useActionError();
   const [busy, setBusy] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(initialOrders.length > 0);
   const [sort, setSort] = useState<SortKey>(statusFirst("TOKEN_ISSUED"));
   const [limit, setLimit] = useState(PAGE_STEP);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState(initialTotal);
   // Phone-only overlay; opens on tap, never from load()'s auto-select.
   const [detailOpen, setDetailOpen] = useState(false);
+  const autoSelected = useRef(initialOrders.length > 0);
   const [cashiers, setCashiers] = useState<Staff[]>([]);
   const [cashierId, setCashierId] = useState("");
 
@@ -74,11 +83,17 @@ export default function RunnerQueue() {
       setOrders(relevant);
       setTotal(page.total);
       clearLoadError();
-      setSelectedId((current) =>
-        current && relevant.some((o) => o.order_id === current)
-          ? current
-          : (relevant[0]?.order_id ?? null),
-      );
+      // Only auto-select on the very first load. If the selected order later
+      // leaves the queue (handed over, delivered, filtered out, or pushed past
+      // the loaded window), clear the selection instead of silently jumping to
+      // another order — otherwise the action buttons retarget under the user
+      // and act on an order they never chose.
+      setSelectedId((current) => {
+        if (current && relevant.some((o) => o.order_id === current)) return current;
+        if (current || autoSelected.current) return null;
+        autoSelected.current = true;
+        return relevant[0]?.order_id ?? null;
+      });
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Failed to load orders");
     } finally {
@@ -86,7 +101,7 @@ export default function RunnerQueue() {
     }
   }, [sort, limit, setLoadError, clearLoadError]);
 
-  usePolling(load, 4000);
+  usePolling(load, 4000, initialOrders.length > 0);
 
   const order = orders.find((o) => o.order_id === selectedId) ?? null;
 
@@ -212,9 +227,10 @@ export default function RunnerQueue() {
         </section>
 
         <DetailPane
-          open={detailOpen}
+          open={detailOpen && !!order}
           title="tokens"
           onClose={() => setDetailOpen(false)}
+          error={error}
         >
           {!order ? (
             <EmptyState

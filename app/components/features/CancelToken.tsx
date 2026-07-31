@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   fetchOrders,
   orderAction,
@@ -28,20 +28,31 @@ const SORT_OPTIONS: SortKey[] = [
 
 // Admin-only token cancellation (cancel_token permission). Cancelling an active
 // token clears the order's token number and returns it to the packing stage.
-export default function CancelToken() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+export default function CancelToken({
+  initialOrders = [],
+  initialTotal = 0,
+}: {
+  // Server-rendered first screenful. Without it the page paints, then the
+  // browser makes a second cross-region round trip before anything shows.
+  initialOrders?: Order[];
+  initialTotal?: number;
+} = {}) {
+  const [orders, setOrders] = useState<Order[]>(initialOrders);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    initialOrders[0]?.order_id ?? null,
+  );
   const [search, setSearch] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [loaded, setLoaded] = useState(false);
+  const [loaded, setLoaded] = useState(initialOrders.length > 0);
   const { error, setActionError, setLoadError, clearLoadError } = useActionError();
   const [message, setMessage] = useState<string | null>(null);
   const [sort, setSort] = useState<SortKey>("token");
   const [limit, setLimit] = useState(PAGE_STEP);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState(initialTotal);
   // Phone-only overlay; opens on tap, never from load()'s auto-select.
   const [detailOpen, setDetailOpen] = useState(false);
+  const autoSelected = useRef(initialOrders.length > 0);
 
   const term = useDebounced(search);
 
@@ -71,11 +82,17 @@ export default function CancelToken() {
       setOrders(data);
       setTotal(page.total);
       clearLoadError();
-      setSelectedId((current) =>
-        current && data.some((o) => o.order_id === current)
-          ? current
-          : (data[0]?.order_id ?? null),
-      );
+      // Only auto-select on the very first load. If the selected order later
+      // leaves the queue (handed over, delivered, filtered out, or pushed past
+      // the loaded window), clear the selection instead of silently jumping to
+      // another order — otherwise the action buttons retarget under the user
+      // and act on an order they never chose.
+      setSelectedId((current) => {
+        if (current && data.some((o) => o.order_id === current)) return current;
+        if (current || autoSelected.current) return null;
+        autoSelected.current = true;
+        return data[0]?.order_id ?? null;
+      });
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Failed to load orders");
     } finally {
@@ -83,7 +100,7 @@ export default function CancelToken() {
     }
   }, [term, sort, limit, setLoadError, clearLoadError]);
 
-  usePolling(load, 4000);
+  usePolling(load, 4000, initialOrders.length > 0);
 
   const filtered = orders;
   const selected = orders.find((o) => o.order_id === selectedId) ?? null;
@@ -192,9 +209,10 @@ export default function CancelToken() {
         </section>
 
         <DetailPane
-          open={detailOpen}
+          open={detailOpen && !!selected}
           title="tokens"
           onClose={() => setDetailOpen(false)}
+          error={error}
         >
           {!selected ? (
             <p className="py-16 text-center text-sm text-slate-500">
