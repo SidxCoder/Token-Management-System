@@ -20,7 +20,7 @@ export async function GET(){
     return NextResponse.json(
         orders.map((o) => ({
             token: o.token_number,
-            order: o.order_id.slice(0,-3) + "***",
+            order: o.order_id,
             // Orders that reached READY_FOR_PICKUP before ready_at existed have
             // no stamp; updated_at is the closest stand-in for those.
             readyAt: (o.ready_at ?? o.updated_at).toISOString(),
