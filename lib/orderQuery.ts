@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { LINE_ORDER } from "./orders";
 import { Status } from "./generated/prisma/enums";
 import type { Order } from "@/app/components/shared/api";
 
@@ -158,7 +159,7 @@ export async function queryOrders(input: OrderQueryInput) {
             orderBy: [TIEBREAK],
             skip,
             take: takeTop,
-            include: { Order_Lines: { select: LINE_SELECT } },
+            include: { Order_Lines: { select: LINE_SELECT, orderBy: [...LINE_ORDER] } },
           })
         : [],
       takeRest
@@ -167,7 +168,7 @@ export async function queryOrders(input: OrderQueryInput) {
             orderBy: [...REST_ORDER],
             skip: Math.max(0, skip - topTotal),
             take: takeRest,
-            include: { Order_Lines: { select: LINE_SELECT } },
+            include: { Order_Lines: { select: LINE_SELECT, orderBy: [...LINE_ORDER] } },
           })
         : [],
     ]);
@@ -189,7 +190,7 @@ export async function queryOrders(input: OrderQueryInput) {
         orderBy: [...SORTS[sort]],
         skip,
         take: pageSize,
-        include: { Order_Lines: { select: LINE_SELECT } },
+        include: { Order_Lines: { select: LINE_SELECT, orderBy: [...LINE_ORDER] } },
       });
 
   return {

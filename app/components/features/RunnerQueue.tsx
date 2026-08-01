@@ -123,6 +123,11 @@ export default function RunnerQueue({
   // back to the list mid-task. It only ever changes on an explicit tap or when a
   // fresh copy of the SAME order arrives, so it can never retarget.
   const order = snapshot;
+  // The pane deliberately keeps showing an order after it leaves this queue, so
+  // the screen does not snap back to the list mid-task. But it is then a record
+  // of something already done — its actions must not stay live, or a second
+  // click fires an action the order's new status no longer allows.
+  const moved = order != null && !orders.some((o) => o.order_id === order.order_id);
 
   const hasMore = orders.length < total;
   const sentinel = useInfiniteScroll(
@@ -146,7 +151,7 @@ export default function RunnerQueue({
       // No runnerId needed: the packager already routed this order, and the
       // server keeps that assignment. Sending none used to error with
       // "pick which runner to hand over to" for anyone who is not a runner.
-      await orderAction(order.order_id, "hand_to_runner");
+      setSnapshot(await orderAction(order.order_id, "hand_to_runner"));
       await load();
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Collect failed");
@@ -164,7 +169,11 @@ export default function RunnerQueue({
     setBusy(true);
     setActionError(null);
     try {
-      await orderAction(order.order_id, "hand_to_cashier", { cashierId });
+      // The order leaves this queue on success, so the refetch cannot refresh
+      // it — take the updated copy from the response instead. Without this the
+      // pane kept the HANDOVER status and a second click hit the server with
+      // "cannot hand to cashier while order is READY_FOR_PICKUP".
+      setSnapshot(await orderAction(order.order_id, "hand_to_cashier", { cashierId }));
       await load();
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Handover failed");
@@ -267,6 +276,27 @@ export default function RunnerQueue({
             />
           ) : (
             <>
+              {moved ? (
+                <div className="mb-5 flex items-start justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-sm text-slate-600">
+                    This order is now{" "}
+                    <span className="font-semibold text-slate-800">
+                      {statusLabel(order.status)}
+                    </span>{" "}
+                    and has left the runner queue. Shown for reference only.
+                  </p>
+                  <button
+                    onClick={() => {
+                      setSnapshot(null);
+                      setSelectedId(null);
+                      setDetailOpen(false);
+                    }}
+                    className="shrink-0 text-sm font-semibold text-blue-600 hover:text-blue-800"
+                  >
+                    Done
+                  </button>
+                </div>
+              ) : null}
               <div className="flex items-start justify-between border-b border-slate-100 pb-5">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-blue-600">
@@ -303,7 +333,7 @@ export default function RunnerQueue({
                 <select
                   value={cashierId}
                   onChange={(event) => setCashierId(event.target.value)}
-                  disabled={order.status !== "HANDOVER" || busy}
+                  disabled={moved || order.status !== "HANDOVER" || busy}
                   className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-slate-400"
                 >
                   <option value="">Select a cashier…</option>
@@ -318,14 +348,14 @@ export default function RunnerQueue({
               <div className="mt-3 flex flex-col gap-3 sm:flex-row">
                 <button
                   onClick={collectBag}
-                  disabled={order.status !== "TOKEN_ISSUED" || busy}
+                  disabled={moved || order.status !== "TOKEN_ISSUED" || busy}
                   className="flex-1 rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
                 >
                   Collect bag
                 </button>
                 <button
                   onClick={handToCashier}
-                  disabled={order.status !== "HANDOVER" || busy || !cashierId}
+                  disabled={moved || order.status !== "HANDOVER" || busy || !cashierId}
                   className="flex-1 rounded-xl border border-blue-600 px-4 py-3 text-sm font-semibold text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
                 >
                   Hand over to cashier

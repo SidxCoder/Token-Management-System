@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import {
+  baggedCount,
   fetchOrders,
   orderAction,
   statusLabel,
@@ -259,16 +260,47 @@ export default function TokenDesk({
                 <h3 className="mt-2 text-xl font-bold text-slate-900">{selected.order_id}</h3>
                 <dl className="mt-6 space-y-3 text-sm">
                   <Row label="Customer" value={selected.customer_name} />
-                  <Row
-                    label="Items"
-                    value={`${selected.number_of_items} item${selected.number_of_items === 1 ? "" : "s"}`}
-                  />
+                  <Row label="Phone" value={selected.phone} />
                   <Row label="Status" value={statusLabel(selected.status)} />
+                  <Row
+                    label="Bagged"
+                    value={`${baggedCount(selected)}/${selected.Order_Lines.length}`}
+                  />
                   <Row
                     label="Token"
                     value={selected.token_number != null ? `#${selected.token_number}` : "—"}
                   />
                 </dl>
+
+                {/* The greeter hands the customer their token, so they need to
+                    see what the order actually contains — not just a count. */}
+                <div className="mt-6">
+                  <h4 className="text-sm font-semibold text-slate-900">
+                    Items ({selected.Order_Lines.length})
+                  </h4>
+                  <div className="mt-3 divide-y divide-slate-100 rounded-xl border border-slate-200">
+                    {selected.Order_Lines.map((line) => (
+                      <div
+                        key={line.id}
+                        className="flex items-center justify-between gap-3 p-3.5"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm text-slate-700">
+                            {line.product_name}
+                          </p>
+                          {line.sku_code ? (
+                            <p className="mt-0.5 truncate font-mono text-xs text-slate-400">
+                              {line.sku_code}
+                            </p>
+                          ) : null}
+                        </div>
+                        <span className="shrink-0 text-xs font-semibold text-slate-500">
+                          {line.bag_number != null ? `Bag ${line.bag_number}` : "No bag"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
                 <button
                   onClick={issueToken}
                   disabled={!canIssue || busy}

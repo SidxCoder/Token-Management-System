@@ -1,5 +1,6 @@
 import { getSessionUser } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { LINE_ORDER } from "@/lib/orders";
 import { can } from "@/lib/permissions";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest,{ params }: { params: Promise<{ order
     const order = await prisma.orders.findUnique({
         where: { order_id: orderId },
         include: {
-            Order_Lines: true,
+            Order_Lines: { orderBy: [...LINE_ORDER] },
             Token: { include: { issuer: { select: { username: true, display_name: true }}}}
         }
     })

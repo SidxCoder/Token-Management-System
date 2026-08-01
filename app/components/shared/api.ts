@@ -173,11 +173,16 @@ export async function fetchOrders(params?: {
   };
 }
 
+// Returns the updated order. Callers should feed this straight back into the
+// detail pane rather than waiting for the next list refetch: an action often
+// moves the order out of the queue it was actioned from (or past the loaded
+// window), and then the refetch cannot see it — leaving the screen showing the
+// pre-action copy, with buttons that act on a status the order no longer has.
 export async function orderAction(
   orderId: string,
   action: string,
   payload: Record<string, unknown> = {},
-) {
+): Promise<Order> {
   const res = await fetch(`/api/orders/${encodeURIComponent(orderId)}/action`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -185,7 +190,7 @@ export async function orderAction(
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error ?? `Action "${action}" failed`);
-  return data;
+  return data as Order;
 }
 
 export type NewOrderLine = {

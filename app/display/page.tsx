@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ShieldLock } from "@/app/components/dashboard/icons";
+import { Hanken_Grotesk } from "next/font/google";
+
+const hankenGrotesk = Hanken_Grotesk({ subsets: ["latin"] });
 
 type DisplayOrder = {
   token: number | null;
@@ -10,25 +12,6 @@ type DisplayOrder = {
   counter: string | null;
 };
 
-const STORE_NAME = "Samsung BKC";
-
-// How long the customer has been waiting since the order hit the counter.
-// Recomputed against a ticking clock so it counts up between the 3s polls.
-function waitingFor(readyAt: string, now: number) {
-  const ms = Math.max(0, now - new Date(readyAt).getTime());
-  const totalMinutes = Math.floor(ms / 60_000);
-  if (totalMinutes < 60) return `${totalMinutes}m`;
-  return `${Math.floor(totalMinutes / 60)}h ${totalMinutes % 60}m`;
-}
-
-// Long waits should be obvious from across the room.
-function waitTone(readyAt: string, now: number) {
-  const minutes = (now - new Date(readyAt).getTime()) / 60_000;
-  if (minutes >= 15) return "bg-red-500/20 text-red-300";
-  if (minutes >= 5) return "bg-amber-500/20 text-amber-300";
-  return "bg-white/10 text-slate-300";
-}
-
 // The customer-facing pickup board is intentionally dark and high-contrast:
 // it is shown on a wall-mounted screen, so oversized token numbers on a deep
 // background read clearly from across the room. It uses the same blue brand
@@ -36,13 +19,9 @@ function waitTone(readyAt: string, now: number) {
 export default function CustomerDisplayPage() {
   const [orders, setOrders] = useState<DisplayOrder[]>([]);
   const [clock, setClock] = useState("");
-  // Drives the per-order waiting timers; the same tick already runs for the
-  // wall clock, so this costs nothing extra.
-  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     const tick = () => {
-      setNow(Date.now());
       setClock(
         new Intl.DateTimeFormat("en-IN", {
           hour: "numeric",
@@ -69,66 +48,83 @@ export default function CustomerDisplayPage() {
   }, []);
 
   return (
-    <div className="flex min-h-screen flex-1 flex-col bg-gradient-to-b from-[#0b1430] to-[#060a15] text-white">
-      <header className="flex items-center justify-between border-b border-white/10 px-8 py-6">
-        <div className="flex items-center gap-4">
-          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl bg-blue-500/15 text-blue-300">
-            <ShieldLock className="h-7 w-7" />
-          </span>
-          <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.25em] text-blue-300">
-              Pickup Display
+    <div className="flex h-dvh flex-col overflow-hidden bg-[#0a0e14] text-white">
+      <header className="relative shrink-0 bg-[#0a0e14] px-5 py-5 text-center sm:px-8">
+        <p className={`${hankenGrotesk.className} text-lg font-bold uppercase tracking-[0.28em] text-[#2ecc71] sm:text-xl`}>
+          SAMSUNG BKC
+        </p>
+        <h1 className={`${hankenGrotesk.className} mt-1 text-2xl font-extrabold tracking-[0.06em] text-white sm:text-3xl`}>
+          ORDER PICKUP STATUS
+        </h1>
+        <section className="mt-4 flex w-full items-center gap-3 rounded-lg border-l-4 border-[#2ecc71] bg-[rgba(46,204,113,0.16)] p-4 text-left shadow-[0_0_18px_rgba(46,204,113,0.16)]">
+          <svg className="h-7 w-7 shrink-0 text-[#2ecc71]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+            <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+            <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+            <path d="M18.5 5.5a9 9 0 0 1 0 13" />
+          </svg>
+          <div className="min-w-0 flex-1">
+            <p className={`${hankenGrotesk.className} text-xs font-bold uppercase tracking-[0.16em] text-[#2ecc71]`}>
+              Announcement
             </p>
-            <h1 className="mt-1 text-3xl font-bold tracking-tight sm:text-4xl">
-              {STORE_NAME}
-            </h1>
+            <p className={`${hankenGrotesk.className} mt-1 text-xl font-extrabold leading-snug text-white sm:text-2xl`}>
+              Please Proceed to the right side Cash Counter for product pickup.
+            </p>
           </div>
-        </div>
-        <p className="font-mono text-2xl text-slate-400">{clock}</p>
+          <p className={`${hankenGrotesk.className} shrink-0 self-start text-lg font-bold tabular-nums text-[#2ecc71] sm:text-xl`}>
+            {clock}
+          </p>
+        </section>
       </header>
 
-      <main className="flex flex-1 flex-col px-6 py-8 sm:px-10">
+      <main className="min-h-0 flex-1 overflow-y-auto px-6 py-8 sm:px-10">
         {orders.length === 0 ? (
           <div className="grid flex-1 place-items-center">
             <p className="text-2xl text-slate-500">No orders ready yet</p>
           </div>
         ) : (
-          <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
             {orders.map((order) => (
               <article
                 key={`${order.token}-${order.order}`}
-                className="rounded-3xl border border-white/10 bg-white/[0.03] px-8 py-10 text-center shadow-lg shadow-black/30"
+                className="relative overflow-hidden rounded-lg border border-[#353940] border-l-4 border-l-[#93c5fd] bg-[#181c22] p-5 shadow-lg shadow-black/30 xl:border-l xl:border-l-[#353940] xl:border-b-2 xl:border-b-[#93c5fd]"
               >
-                <p className="text-sm font-semibold uppercase tracking-widest text-blue-300">
-                  Token
-                </p>
-                <p className="mt-3 text-7xl font-black tracking-tight text-white sm:text-8xl">
-                  {String(order.token).padStart(2, "0")}
-                </p>
-                {order.counter ? (
-                  <p className="mt-4 text-3xl font-bold tracking-tight text-emerald-300 sm:text-4xl">
-                    {order.counter}
-                  </p>
-                ) : null}
-                <p className="mt-4 text-lg text-slate-400">{order.order}</p>
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                  <span className="inline-block rounded-full bg-blue-500/15 px-4 py-2 text-sm font-semibold text-blue-300">
-                    Ready for Pickup
-                  </span>
-                  <span
-                    className={`inline-block rounded-full px-4 py-2 text-sm font-semibold tabular-nums ${waitTone(order.readyAt, now)}`}
-                  >
-                    waiting {waitingFor(order.readyAt, now)}
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className={`${hankenGrotesk.className} text-xs font-medium uppercase tracking-[0.2em] text-white/50`}>
+                      Token
+                    </p>
+                    <p className={`${hankenGrotesk.className} mt-2 text-7xl font-extrabold leading-none tracking-tight text-white sm:text-8xl`}>
+                      {String(order.token).padStart(2, "0")}
+                    </p>
+                  </div>
+                  <span className={`${hankenGrotesk.className} rounded-full bg-blue-950 px-4 py-2 text-xs font-bold uppercase tracking-[0.16em] text-blue-300`}>
+                    Ready
                   </span>
                 </div>
+                <div className={`${hankenGrotesk.className} mt-5 flex items-center gap-2 text-lg font-bold text-[#2ecc71]`}>
+                  <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <path d="M3 21h18" />
+                    <path d="M5 21V8l7-4 7 4v13" />
+                    <path d="M9 21v-5h6v5" />
+                    <path d="M9 10h.01M15 10h.01" />
+                  </svg>
+                  <span>{order.counter ?? "Pickup Counter"}</span>
+                </div>
+                <div className="my-5 h-px bg-white/10" />
+                <p className={`${hankenGrotesk.className} text-xs font-medium uppercase tracking-[0.16em] text-white/45`}>
+                  Order ID
+                </p>
+                <p className={`${hankenGrotesk.className} mt-1 text-sm font-medium text-white`}>
+                  {order.order}
+                </p>
               </article>
             ))}
           </div>
         )}
       </main>
 
-      <footer className="border-t border-white/10 px-8 py-4 text-center text-sm text-slate-500">
-        Please proceed to the counter shown next to your token
+      <footer className="shrink-0 border-t border-white/10 px-8 py-4 text-center text-sm text-slate-500">
+        Please keep your ID &amp; Invoice ready
       </footer>
     </div>
   );

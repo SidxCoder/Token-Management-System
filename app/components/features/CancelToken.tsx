@@ -130,7 +130,7 @@ export default function CancelToken({
     setActionError(null);
     setMessage(null);
     try {
-      await orderAction(selected.order_id, "cancel_token");
+      setSnapshot(await orderAction(selected.order_id, "cancel_token"));
       setMessage(`Token cancelled for ${selected.order_id}.`);
       setConfirming(false);
       await load();
