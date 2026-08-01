@@ -59,6 +59,9 @@ export default function RunnerQueue({
   const [total, setTotal] = useState(initialTotal);
   // Phone-only overlay; opens on tap, never from load()'s auto-select.
   const [detailOpen, setDetailOpen] = useState(false);
+  const [snapshot, setSnapshot] = useState<Order | null>(
+    initialOrders[0] ?? null,
+  );
   const autoSelected = useRef(initialOrders.length > 0);
   const [cashiers, setCashiers] = useState<Staff[]>([]);
   const [cashierId, setCashierId] = useState("");
@@ -78,10 +81,19 @@ export default function RunnerQueue({
 
   const load = useCallback(async () => {
     try {
-      const page = await fetchOrders({ status: RUNNER_STATUSES, sort, limit, mine: true });
+      const page = await fetchOrders({
+        status: RUNNER_STATUSES,
+        sort,
+        limit,
+        mine: true,
+        linesHandedOver: true,
+      });
       const relevant = page.orders;
       setOrders(relevant);
       setTotal(page.total);
+      setSnapshot((prev) =>
+        prev ? (relevant.find((o) => o.order_id === prev.order_id) ?? prev) : prev,
+      );
       clearLoadError();
       // Only auto-select on the very first load. If the selected order later
       // leaves the queue (handed over, delivered, filtered out, or pushed past
@@ -89,8 +101,10 @@ export default function RunnerQueue({
       // another order — otherwise the action buttons retarget under the user
       // and act on an order they never chose.
       setSelectedId((current) => {
-        if (current && relevant.some((o) => o.order_id === current)) return current;
-        if (current || autoSelected.current) return null;
+        // Never retarget and never clear: once the user picks an order it stays
+        // picked, even if it leaves this queue. Auto-select happens once.
+        if (current) return current;
+        if (autoSelected.current) return null;
         autoSelected.current = true;
         return relevant[0]?.order_id ?? null;
       });
@@ -103,7 +117,12 @@ export default function RunnerQueue({
 
   usePolling(load, 4000, initialOrders.length > 0);
 
-  const order = orders.find((o) => o.order_id === selectedId) ?? null;
+  // An action can move the selected order out of this queue (handed over,
+  // delivered, returned) and a re-sort can push it past the loaded window.
+  // `snapshot` keeps the copy the user is working on so the screen never snaps
+  // back to the list mid-task. It only ever changes on an explicit tap or when a
+  // fresh copy of the SAME order arrives, so it can never retarget.
+  const order = snapshot;
 
   const hasMore = orders.length < total;
   const sentinel = useInfiniteScroll(
@@ -124,6 +143,9 @@ export default function RunnerQueue({
     setBusy(true);
     setActionError(null);
     try {
+      // No runnerId needed: the packager already routed this order, and the
+      // server keeps that assignment. Sending none used to error with
+      // "pick which runner to hand over to" for anyone who is not a runner.
       await orderAction(order.order_id, "hand_to_runner");
       await load();
     } catch (e) {
@@ -190,6 +212,7 @@ export default function RunnerQueue({
                   key={item.order_id}
                   onClick={() => {
                     setSelectedId(item.order_id);
+                    setSnapshot(item);
                     setDetailOpen(true);
                   }}
                   className={`w-full rounded-xl border p-4 text-left transition ${
@@ -210,7 +233,10 @@ export default function RunnerQueue({
                     {item.order_id} · {item.customer_name}
                   </p>
                   <p className="mt-2 text-xs text-slate-400">
-                    {baggedCount(item)}/{item.Order_Lines.length} bagged
+                    {baggedCount(item)}/{item.Order_Lines.length} bagged{item.Order_Lines.some((l) => l.handed_over) &&
+                    !item.Order_Lines.every((l) => l.handed_over)
+                      ? " · partially handed over"
+                      : ""}
                   </p>
                 </button>
               ))}

@@ -52,6 +52,9 @@ export default function CancelToken({
   const [total, setTotal] = useState(initialTotal);
   // Phone-only overlay; opens on tap, never from load()'s auto-select.
   const [detailOpen, setDetailOpen] = useState(false);
+  const [snapshot, setSnapshot] = useState<Order | null>(
+    initialOrders[0] ?? null,
+  );
   const autoSelected = useRef(initialOrders.length > 0);
 
   const term = useDebounced(search);
@@ -81,6 +84,9 @@ export default function CancelToken({
       const data = page.orders;
       setOrders(data);
       setTotal(page.total);
+      setSnapshot((prev) =>
+        prev ? (data.find((o) => o.order_id === prev.order_id) ?? prev) : prev,
+      );
       clearLoadError();
       // Only auto-select on the very first load. If the selected order later
       // leaves the queue (handed over, delivered, filtered out, or pushed past
@@ -88,8 +94,10 @@ export default function CancelToken({
       // another order — otherwise the action buttons retarget under the user
       // and act on an order they never chose.
       setSelectedId((current) => {
-        if (current && data.some((o) => o.order_id === current)) return current;
-        if (current || autoSelected.current) return null;
+        // Never retarget and never clear: once the user picks an order it stays
+        // picked, even if it leaves this queue. Auto-select happens once.
+        if (current) return current;
+        if (autoSelected.current) return null;
         autoSelected.current = true;
         return data[0]?.order_id ?? null;
       });
@@ -103,7 +111,12 @@ export default function CancelToken({
   usePolling(load, 4000, initialOrders.length > 0);
 
   const filtered = orders;
-  const selected = orders.find((o) => o.order_id === selectedId) ?? null;
+  // An action can move the selected order out of this queue (handed over,
+  // delivered, returned) and a re-sort can push it past the loaded window.
+  // `snapshot` keeps the copy the user is working on so the screen never snaps
+  // back to the list mid-task. It only ever changes on an explicit tap or when a
+  // fresh copy of the SAME order arrives, so it can never retarget.
+  const selected = snapshot;
 
   const hasMore = orders.length < total;
   const sentinel = useInfiniteScroll(
@@ -170,6 +183,7 @@ export default function CancelToken({
                   key={item.order_id}
                   onClick={() => {
                     setSelectedId(item.order_id);
+                    setSnapshot(item);
                     setDetailOpen(true);
                     setConfirming(false);
                     setMessage(null);

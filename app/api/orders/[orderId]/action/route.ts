@@ -1,5 +1,5 @@
 import { getSessionUser } from "@/lib/auth";
-import { cancelOrder, deliver, handToCashier, handToRunner, issueToken, OverrideStatus, setBagNumber, WorkflowError } from "@/lib/orders";
+import { assignRunner, cancelOrder, deliver, handToCashier, handToRunner, issueToken, OverrideStatus, returnToPackager, setBagNumber, WorkflowError } from "@/lib/orders";
 import { NextRequest, NextResponse } from "next/server";
 
 export async function POST(req: NextRequest, { params }: {params: Promise< {orderId: string}> }){
@@ -21,6 +21,10 @@ export async function POST(req: NextRequest, { params }: {params: Promise< {orde
                 return NextResponse.json( await issueToken(user, orderId));
             case "set_bag_number":
                 return NextResponse.json( await setBagNumber(user,orderId, payload));
+            case "assign_runner":
+                return NextResponse.json( await assignRunner(user, orderId, payload));
+            case "return_order":
+                return NextResponse.json( await returnToPackager(user, orderId, payload));
             case "hand_to_runner":
                 return NextResponse.json( await handToRunner(user, orderId, payload));
             case "hand_to_cashier":

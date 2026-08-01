@@ -41,6 +41,8 @@ export default function DeliveryDesk({
     initialOrders[0]?.order_id ?? null,
   );
   const [tokenInput, setTokenInput] = useState("");
+  const [returnReason, setReturnReason] = useState("");
+  const [confirmReturn, setConfirmReturn] = useState(false);
   const { error, setActionError, setLoadError, clearLoadError } = useActionError();
   const [busy, setBusy] = useState(false);
   const [loaded, setLoaded] = useState(initialOrders.length > 0);
@@ -49,6 +51,9 @@ export default function DeliveryDesk({
   const [total, setTotal] = useState(initialTotal);
   // Phone-only overlay; opens on tap, never from load()'s auto-select.
   const [detailOpen, setDetailOpen] = useState(false);
+  const [snapshot, setSnapshot] = useState<Order | null>(
+    initialOrders[0] ?? null,
+  );
   const autoSelected = useRef(initialOrders.length > 0);
 
   // A new sort means a different result set, so the window resets here rather
@@ -70,6 +75,9 @@ export default function DeliveryDesk({
       const data = page.orders;
       setOrders(data);
       setTotal(page.total);
+      setSnapshot((prev) =>
+        prev ? (data.find((o) => o.order_id === prev.order_id) ?? prev) : prev,
+      );
       clearLoadError();
       // Only auto-select on the very first load. If the selected order later
       // leaves the queue (handed over, delivered, filtered out, or pushed past
@@ -77,8 +85,10 @@ export default function DeliveryDesk({
       // another order — otherwise the action buttons retarget under the user
       // and act on an order they never chose.
       setSelectedId((current) => {
-        if (current && data.some((o) => o.order_id === current)) return current;
-        if (current || autoSelected.current) return null;
+        // Never retarget and never clear: once the user picks an order it stays
+        // picked, even if it leaves this queue. Auto-select happens once.
+        if (current) return current;
+        if (autoSelected.current) return null;
         autoSelected.current = true;
         return data[0]?.order_id ?? null;
       });
@@ -97,11 +107,35 @@ export default function DeliveryDesk({
     hasMore,
   );
 
-  const order = orders.find((o) => o.order_id === selectedId) ?? null;
+  // An action can move the selected order out of this queue (handed over,
+  // delivered, returned) and a re-sort can push it past the loaded window.
+  // `snapshot` keeps the copy the user is working on so the screen never snaps
+  // back to the list mid-task. It only ever changes on an explicit tap or when a
+  // fresh copy of the SAME order arrives, so it can never retarget.
+  const order = snapshot;
   const tokenOk =
     !order ||
     tokenInput.trim() === "" ||
     Number(tokenInput.trim()) === order.token_number;
+
+  // The customer never turned up: send everything back to packing. This cancels
+  // the token, so the order leaves the customer display immediately.
+  async function returnOrder() {
+    if (!order) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await orderAction(order.order_id, "return_order", { reason: returnReason.trim() });
+      setReturnReason("");
+      setConfirmReturn(false);
+      setTokenInput("");
+      await load();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : "Return failed");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function markDelivered() {
     if (!order) return;
@@ -164,6 +198,7 @@ export default function DeliveryDesk({
                   key={item.order_id}
                   onClick={() => {
                     setSelectedId(item.order_id);
+                    setSnapshot(item);
                     setDetailOpen(true);
                     setTokenInput("");
                   }}
@@ -261,6 +296,48 @@ export default function DeliveryDesk({
               >
                 {busy ? "Updating…" : "Mark delivered"}
               </button>
+
+              {confirmReturn ? (
+                <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                  <p className="text-sm font-semibold text-amber-900">
+                    Return this order to packing?
+                  </p>
+                  <p className="mt-1 text-xs text-amber-800">
+                    The token is cancelled and removed from the customer display,
+                    and every item goes back to the packing queue.
+                  </p>
+                  <input
+                    value={returnReason}
+                    onChange={(event) => setReturnReason(event.target.value)}
+                    placeholder="Reason (optional) — e.g. customer left"
+                    className="mt-3 w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+                  />
+                  <div className="mt-3 flex gap-3">
+                    <button
+                      onClick={returnOrder}
+                      disabled={busy}
+                      className="flex-1 rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:opacity-60"
+                    >
+                      {busy ? "Returning…" : "Confirm return"}
+                    </button>
+                    <button
+                      onClick={() => setConfirmReturn(false)}
+                      disabled={busy}
+                      className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-white disabled:opacity-60"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmReturn(true)}
+                  disabled={busy}
+                  className="mt-3 w-full rounded-xl border border-amber-500 px-4 py-3 text-sm font-semibold text-amber-700 transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+                >
+                  Not collected — return to packing
+                </button>
+              )}
             </>
           )}
         </DetailPane>

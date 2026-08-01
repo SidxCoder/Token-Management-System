@@ -13,12 +13,17 @@ export const PERMISSIONS = {
   hand_to_runner: [Role.PACKAGER, Role.RUNNER, Role.ADMIN],
   hand_to_cashier: [Role.RUNNER, Role.ADMIN],
   deliver: [Role.CASHIER, Role.ADMIN],
+  // Uncollected order goes back to packing.
+  return_order: [Role.CASHIER, Role.ADMIN],
   cancel_token: [Role.ADMIN],
   override_status: [Role.ADMIN],
   edit_fields: [Role.ADMIN],
   manage_users: [Role.ADMIN],
   view_reports: [Role.ADMIN],
   view_audit: [Role.ADMIN],
+  // Wipes every order, token, session and non-admin account. Admin only, and
+  // the route additionally requires two typed confirmations.
+  reset_data: [Role.ADMIN],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Action = keyof typeof PERMISSIONS;

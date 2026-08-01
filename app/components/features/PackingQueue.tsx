@@ -56,6 +56,9 @@ export default function PackingQueue({
   const [total, setTotal] = useState(initialTotal);
   // Phone-only overlay; opens on tap, never from load()'s auto-select.
   const [detailOpen, setDetailOpen] = useState(false);
+  const [snapshot, setSnapshot] = useState<Order | null>(
+    initialOrders[0] ?? null,
+  );
   const autoSelected = useRef(initialOrders.length > 0);
   const [selectedId, setSelectedId] = useState<string | null>(
     initialOrders[0]?.order_id ?? null,
@@ -102,6 +105,9 @@ export default function PackingQueue({
       const data = page.orders;
       setOrders(data);
       setTotal(page.total);
+      setSnapshot((prev) =>
+        prev ? (data.find((o) => o.order_id === prev.order_id) ?? prev) : prev,
+      );
       clearLoadError();
       // Only auto-select on the very first load. If the selected order later
       // leaves the queue (handed over, delivered, filtered out, or pushed past
@@ -109,8 +115,10 @@ export default function PackingQueue({
       // another order — otherwise the action buttons retarget under the user
       // and act on an order they never chose.
       setSelectedId((current) => {
-        if (current && data.some((o) => o.order_id === current)) return current;
-        if (current || autoSelected.current) return null;
+        // Never retarget and never clear: once the user picks an order it stays
+        // picked, even if it leaves this queue. Auto-select happens once.
+        if (current) return current;
+        if (autoSelected.current) return null;
         autoSelected.current = true;
         return data[0]?.order_id ?? null;
       });
@@ -123,7 +131,12 @@ export default function PackingQueue({
 
   usePolling(load, 4000, initialOrders.length > 0);
 
-  const order = orders.find((o) => o.order_id === selectedId) ?? null;
+  // An action can move the selected order out of this queue (handed over,
+  // delivered, returned) and a re-sort can push it past the loaded window.
+  // `snapshot` keeps the copy the user is working on so the screen never snaps
+  // back to the list mid-task. It only ever changes on an explicit tap or when a
+  // fresh copy of the SAME order arrives, so it can never retarget.
+  const order = snapshot;
 
   const hasMore = orders.length < total;
   const sentinel = useInfiniteScroll(
@@ -183,7 +196,9 @@ export default function PackingQueue({
     setBusy(true);
     setActionError(null);
     try {
-      await orderAction(order.order_id, "hand_to_runner", { runnerId });
+      // Releases the bagged lines to that runner. Unbagged lines stay here, so
+      // the same order can be handed over again once they are bagged.
+      await orderAction(order.order_id, "assign_runner", { runnerId });
       await load();
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Failed to hand over");
@@ -192,10 +207,14 @@ export default function PackingQueue({
     }
   }
 
-  const allBagged = order
-    ? order.Order_Lines.every((l) => l.bag_number != null)
-    : false;
-  const canHandOver = order?.status === "TOKEN_ISSUED" && allBagged;
+  // Partial handover: anything bagged and not yet released can go now.
+  const readyLines = order
+    ? order.Order_Lines.filter((l) => l.bag_number != null && !l.handed_over)
+    : [];
+  const pendingLines = order
+    ? order.Order_Lines.filter((l) => !l.handed_over && l.bag_number == null)
+    : [];
+  const canHandOver = order?.status === "TOKEN_ISSUED" && readyLines.length > 0;
 
   return (
     <div className="space-y-6 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
@@ -281,6 +300,7 @@ export default function PackingQueue({
                   key={item.order_id}
                   onClick={() => {
                     setSelectedId(item.order_id);
+                    setSnapshot(item);
                     setDetailOpen(true);
                   }}
                   className={`w-full rounded-xl border p-4 text-left transition ${
@@ -297,7 +317,10 @@ export default function PackingQueue({
                   </div>
                   <p className="mt-1 text-sm text-slate-500">{item.customer_name}</p>
                   <p className="mt-2 text-xs text-slate-400">
-                    {baggedCount(item)}/{item.Order_Lines.length} bagged
+                    {baggedCount(item)}/{item.Order_Lines.length} bagged{item.Order_Lines.some((l) => l.handed_over) &&
+                    !item.Order_Lines.every((l) => l.handed_over)
+                      ? " · partially handed over"
+                      : ""}
                   </p>
                 </button>
               ))}
@@ -407,11 +430,20 @@ export default function PackingQueue({
                 disabled={!canHandOver || busy || !runnerId}
                 className="mt-3 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >
-                Hand over to runner
+                {readyLines.length > 0 && readyLines.length < order.Order_Lines.length
+                  ? `Hand over ${readyLines.length} of ${order.Order_Lines.length} items`
+                  : "Hand over to runner"}
               </button>
               {!canHandOver ? (
                 <p className="mt-3 text-center text-xs text-slate-400">
-                  Needs token issued and every line bagged.
+                  {order.status !== "TOKEN_ISSUED"
+                    ? "Needs a token issued first."
+                    : "Bag at least one item to hand over."}
+                </p>
+              ) : pendingLines.length ? (
+                <p className="mt-3 text-center text-xs text-amber-600">
+                  {pendingLines.length} item{pendingLines.length === 1 ? "" : "s"} still
+                  unbagged — they stay in packing and can follow later.
                 </p>
               ) : runners.length === 0 ? (
                 <p className="mt-3 text-center text-xs text-slate-400">

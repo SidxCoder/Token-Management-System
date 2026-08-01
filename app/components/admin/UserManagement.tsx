@@ -35,8 +35,9 @@ const emptyUser = {
   station_number: "",
 };
 
-// Only these roles are handed bags, so only they carry a station number.
-const NUMBERED_ROLES: UserRole[] = ["runner", "cashier"];
+// Every operational role is a numbered station — staff are identified by the
+// position they work, not their name. Admin is an account, not a station.
+const NUMBERED_ROLES: UserRole[] = ["packager", "greeter", "runner", "cashier"];
 
 function mapUser(user: ApiUser): UiUser {
   return {
@@ -61,6 +62,25 @@ export default function UserManagement() {
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<UiUser | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Station number the server would hand out next, shown in the form before the
+  // account exists so the admin knows what they are creating.
+  const [nextStation, setNextStation] = useState<number | null>(null);
+
+  // Only fetches; the "not applicable" case is handled by not rendering the
+  // preview at all, so this never sets state synchronously during the effect.
+  useEffect(() => {
+    if (!NUMBERED_ROLES.includes(form.role) || editingId) return;
+    let cancelled = false;
+    void fetch(`/api/staff?role=${toApiRole(form.role)}&next=1`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled) setNextStation(typeof d?.next === "number" ? d.next : null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [form.role, editingId, users]);
 
   const loadUsers = useCallback(async () => {
     setError(null);
@@ -142,7 +162,11 @@ export default function UserManagement() {
     event.preventDefault();
     const display_name = form.display_name.trim();
     const username = form.username.trim();
-    if (!display_name || !username || (!editingId && !form.password)) return;
+    // Runners and cashiers get their name, username and number from the server,
+    // so those fields are not required when creating one.
+    const derived = NUMBERED_ROLES.includes(form.role) && !editingId;
+    if (!derived && (!display_name || !username)) return;
+    if (!editingId && !form.password) return;
 
     setSaving(true);
     setError(null);
@@ -344,19 +368,26 @@ export default function UserManagement() {
               </button>
             </div>
             <div className="grid gap-4 md:grid-cols-3">
-              <Input
-                label="Display name"
-                value={form.display_name}
-                onChange={(display_name) => setForm({ ...form, display_name })}
-                placeholder="e.g. Anaya Singh"
-              />
-              {!editingId ? (
-                <Input
-                  label="Username"
-                  value={form.username}
-                  onChange={(username) => setForm({ ...form, username })}
-                  placeholder="e.g. anaya"
-                />
+              {/* A numbered station is identified by its number, so the name and
+                  username are derived from the role rather than typed in. Other
+                  roles are people, and still need both. */}
+              {!(NUMBERED_ROLES.includes(form.role) && !editingId) ? (
+                <>
+                  <Input
+                    label="Display name"
+                    value={form.display_name}
+                    onChange={(display_name) => setForm({ ...form, display_name })}
+                    placeholder="e.g. Anaya Singh"
+                  />
+                  {!editingId ? (
+                    <Input
+                      label="Username"
+                      value={form.username}
+                      onChange={(username) => setForm({ ...form, username })}
+                      placeholder="e.g. anaya"
+                    />
+                  ) : null}
+                </>
               ) : null}
               <PasswordInput
                 label={editingId ? "New password (leave blank to keep)" : "Password"}
@@ -382,25 +413,21 @@ export default function UserManagement() {
                   ))}
                 </select>
               </label>
-              {NUMBERED_ROLES.includes(form.role) ? (
-                <label className="block text-sm font-medium text-slate-700">
-                  Station number
-                  <input
-                    type="number"
-                    min={1}
-                    value={form.station_number}
-                    onChange={(event) =>
-                      setForm({ ...form, station_number: event.target.value })
-                    }
-                    placeholder="e.g. 2"
-                    className="mt-1.5 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 font-normal text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-                  />
-                  <span className="mt-1 block text-xs font-normal text-slate-500">
-                    Shown as &ldquo;{ROLE_CONFIG[form.role].label}{" "}
-                    {form.station_number || "N"}&rdquo; when handing over. Must be
-                    unique within the role.
-                  </span>
-                </label>
+              {NUMBERED_ROLES.includes(form.role) && !editingId ? (
+                <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-sm sm:col-span-2">
+                  <p className="font-semibold text-blue-900">
+                    Will be created as{" "}
+                    {ROLE_CONFIG[form.role].label}{" "}
+                    {nextStation ?? "…"}
+                  </p>
+                  <p className="mt-1 text-xs text-blue-800">
+                    The station number is assigned automatically — this is the
+                    lowest free number for the role, so a deleted station gets
+                    reused. Staff and the customer display both see it as
+                    &ldquo;{ROLE_CONFIG[form.role].label} {nextStation ?? "N"}
+                    &rdquo;.
+                  </p>
+                </div>
               ) : null}
             </div>
             <button

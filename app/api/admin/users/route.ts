@@ -16,10 +16,45 @@ function parseStation(raw: unknown, role: Role | undefined) {
     if (!Number.isInteger(n) || n < 1) {
         throw new Error("station number must be a positive whole number");
     }
-    if (role && role !== Role.RUNNER && role !== Role.CASHIER) {
-        throw new Error("only runners and cashiers can have a station number");
+    if (role && !isNumbered(role)) {
+        throw new Error("admin accounts do not have a station number");
     }
     return n;
+}
+
+// Roles that occupy a numbered station. Every operational role works this way —
+// staff are identified by the position they are working, not by their name.
+// ADMIN is excluded: it is an account, not a station on the floor.
+const NUMBERED = [Role.PACKAGER, Role.GREETER, Role.RUNNER, Role.CASHIER] as const;
+type NumberedRole = (typeof NUMBERED)[number];
+
+const STATION_LABEL: Record<NumberedRole, string> = {
+    [Role.PACKAGER]: "Packager",
+    [Role.GREETER]: "Greeter",
+    [Role.RUNNER]: "Runner",
+    [Role.CASHIER]: "Cashier",
+};
+
+function isNumbered(role: Role): role is NumberedRole {
+    return (NUMBERED as readonly Role[]).includes(role);
+}
+
+// Next free station number for a role. Archived accounts release their number,
+// so deleting Runner 2 lets the next runner reuse it and the numbering stays
+// contiguous instead of drifting upward forever.
+async function nextStationNumber(role: NumberedRole) {
+    const taken = await prisma.user.findMany({
+        where: { role, archived: false, station_number: { not: null } },
+        select: { station_number: true },
+    });
+    const used = new Set(taken.map((u) => u.station_number));
+    let n = 1;
+    while (used.has(n)) n += 1;
+    return n;
+}
+
+function stationLabel(role: NumberedRole, n: number) {
+    return `${STATION_LABEL[role]} ${n}`;
 }
 
 async function requireAdmin() {
@@ -104,6 +139,13 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => null);
     const { username, password, display_name, role, station_number } = body ?? {};
 
+    if (!role || !(role in Role)) {
+        return NextResponse.json({ error: `role must be one of: ${Object.keys(Role).join(", ")}` }, { status: 400 });
+    }
+    if (!password) {
+        return NextResponse.json({ error: "password is required" }, { status: 400 });
+    }
+
     let station: number | null | undefined;
     try {
         station = parseStation(station_number, role as Role);
@@ -111,22 +153,33 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: (e as Error).message }, { status: 400 });
     }
 
-    if (!username?.trim() || !password || !display_name?.trim()) {
-        return NextResponse.json({ error: "username, password and display_name are required" }, { status: 400 });
-    }
-    if (!role || !(role in Role)) {
-        return NextResponse.json({ error: `role must be one of: ${Object.keys(Role).join(", ")}` }, { status: 400 });
+    // Runners and cashiers are identified by their station, so the number, the
+    // display name and the username are all derived from the role instead of
+    // being typed in. An explicit value still wins if one is supplied.
+    let name = display_name?.trim() ?? "";
+    let login = username?.trim() ?? "";
+
+    if (isNumbered(role as Role)) {
+        if (station === undefined || station === null) {
+            station = await nextStationNumber(role as NumberedRole);
+        }
+        if (!name) name = stationLabel(role as NumberedRole, station);
+        if (!login) login = name.toLowerCase().replace(/\s+/g, "");
     }
 
-    const existing = await prisma.user.findUnique({ where: { username: username.trim() } });
-    if (existing) return NextResponse.json({ error: `username "${username.trim()}" already exists` }, { status: 409 });
+    if (!login || !name) {
+        return NextResponse.json({ error: "username and display_name are required for this role" }, { status: 400 });
+    }
+
+    const existing = await prisma.user.findUnique({ where: { username: login } });
+    if (existing) return NextResponse.json({ error: `username "${login}" already exists` }, { status: 409 });
 
     const created = await prisma.$transaction(async (tx) => {
         const u = await tx.user.create({
             data: {
-                username: username.trim(),
+                username: login,
                 password_hash: password,   // plaintext by project decision (plan.md §11)
-                display_name: display_name.trim(),
+                display_name: name,
                 role: role as Role,
                 ...(station !== undefined ? { station_number: station } : {}),
             },

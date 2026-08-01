@@ -32,6 +32,8 @@ const LINE_SELECT = {
   product_name: true,
   bag_number: true,
   sku_code: true,
+  // Which lines have physically moved to the runner (partial handover).
+  handed_over: true,
 } as const;
 
 const SORTS = {
@@ -84,6 +86,8 @@ export type OrderQueryInput = {
   pageSize?: number;
   /** Scope to the signed-in station. Derived from the session, never the client. */
   mine?: boolean;
+  /** Match orders that have at least one line in this handover state. */
+  linesHandedOver?: boolean;
   role?: string;
   userId?: string;
 };
@@ -102,18 +106,25 @@ export async function queryOrders(input: OrderQueryInput) {
   const q = input.q?.trim() ?? "";
   const statuses = input.statuses ?? [];
 
-  // Unassigned rows stay visible so nothing stranded before stations existed
-  // becomes unreachable, and so runners can still claim from the unclaimed pool.
+  // Strict scoping: a runner sees only what has been routed to them. This used
+  // to also match `runner_id: null`, which meant every runner saw every
+  // unassigned order — an order sent to Runner 1 showed up on Runner 2's screen
+  // too. Assignment now happens at handover, so there is no unassigned pool.
   const mineFilter =
     input.mine && input.role === "RUNNER"
-      ? { OR: [{ runner_id: input.userId }, { runner_id: null }] }
+      ? { runner_id: input.userId }
       : input.mine && input.role === "CASHIER"
-        ? { OR: [{ cashier_id: input.userId }, { cashier_id: null }] }
+        ? { cashier_id: input.userId }
         : {};
 
   const where = {
     ...(statuses.length ? { status: { in: statuses } } : {}),
     ...(input.hasToken ? { token_number: { not: null } } : {}),
+    // Partial handover splits an order across stages, so the queues filter on
+    // line state rather than on order status alone.
+    ...(input.linesHandedOver !== undefined
+      ? { Order_Lines: { some: { handed_over: input.linesHandedOver } } }
+      : {}),
     ...mineFilter,
     ...(q
       ? {
