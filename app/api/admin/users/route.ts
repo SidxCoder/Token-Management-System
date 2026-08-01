@@ -16,15 +16,24 @@ function parseStation(raw: unknown, role: Role | undefined) {
     if (!Number.isInteger(n) || n < 1) {
         throw new Error("station number must be a positive whole number");
     }
-    if (role && role !== Role.RUNNER && role !== Role.CASHIER) {
-        throw new Error("only runners and cashiers can have a station number");
+    if (role && !isNumbered(role)) {
+        throw new Error("admin accounts do not have a station number");
     }
     return n;
 }
 
-// Roles that occupy a numbered station.
-const NUMBERED = [Role.RUNNER, Role.CASHIER] as const;
+// Roles that occupy a numbered station. Every operational role works this way —
+// staff are identified by the position they are working, not by their name.
+// ADMIN is excluded: it is an account, not a station on the floor.
+const NUMBERED = [Role.PACKAGER, Role.GREETER, Role.RUNNER, Role.CASHIER] as const;
 type NumberedRole = (typeof NUMBERED)[number];
+
+const STATION_LABEL: Record<NumberedRole, string> = {
+    [Role.PACKAGER]: "Packager",
+    [Role.GREETER]: "Greeter",
+    [Role.RUNNER]: "Runner",
+    [Role.CASHIER]: "Cashier",
+};
 
 function isNumbered(role: Role): role is NumberedRole {
     return (NUMBERED as readonly Role[]).includes(role);
@@ -45,7 +54,7 @@ async function nextStationNumber(role: NumberedRole) {
 }
 
 function stationLabel(role: NumberedRole, n: number) {
-    return `${role === Role.RUNNER ? "Runner" : "Cashier"} ${n}`;
+    return `${STATION_LABEL[role]} ${n}`;
 }
 
 async function requireAdmin() {

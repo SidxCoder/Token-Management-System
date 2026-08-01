@@ -29,7 +29,8 @@ export async function GET(req: NextRequest) {
     // `?next=1` returns the station number a new account of this role would get,
     // so the create form can show it before the account exists.
     if (req.nextUrl.searchParams.get("next") === "1") {
-        if (roleRaw !== Role.RUNNER && roleRaw !== Role.CASHIER) {
+        // Every operational role is numbered; only ADMIN has no station.
+        if (roleRaw === Role.ADMIN) {
             return NextResponse.json({ next: null });
         }
         const taken = await prisma.user.findMany({

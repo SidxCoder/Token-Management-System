@@ -35,8 +35,9 @@ const emptyUser = {
   station_number: "",
 };
 
-// Only these roles are handed bags, so only they carry a station number.
-const NUMBERED_ROLES: UserRole[] = ["runner", "cashier"];
+// Every operational role is a numbered station — staff are identified by the
+// position they work, not their name. Admin is an account, not a station.
+const NUMBERED_ROLES: UserRole[] = ["packager", "greeter", "runner", "cashier"];
 
 function mapUser(user: ApiUser): UiUser {
   return {

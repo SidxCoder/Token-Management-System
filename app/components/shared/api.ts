@@ -109,13 +109,17 @@ export type Staff = {
   station_number: number | null;
 };
 
-export function staffLabel(role: "Runner" | "Cashier", s: Staff) {
+// Staff are identified by the station they are working. The name is kept as a
+// suffix for accounts created before numbering existed, which have none.
+export function staffLabel(role: "Packager" | "Greeter" | "Runner" | "Cashier", s: Staff) {
   return s.station_number != null
     ? `${role} ${s.station_number} — ${s.display_name}`
     : s.display_name;
 }
 
-export async function fetchStaff(role: "RUNNER" | "CASHIER"): Promise<Staff[]> {
+export async function fetchStaff(
+  role: "PACKAGER" | "GREETER" | "RUNNER" | "CASHIER",
+): Promise<Staff[]> {
   const res = await fetch(`/api/staff?role=${role}`);
   const data = await res.json().catch(() => []);
   if (!res.ok) return [];

@@ -21,6 +21,9 @@ export const PERMISSIONS = {
   manage_users: [Role.ADMIN],
   view_reports: [Role.ADMIN],
   view_audit: [Role.ADMIN],
+  // Wipes every order, token, session and non-admin account. Admin only, and
+  // the route additionally requires two typed confirmations.
+  reset_data: [Role.ADMIN],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Action = keyof typeof PERMISSIONS;

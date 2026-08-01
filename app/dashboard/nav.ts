@@ -24,6 +24,8 @@ export const NAV_ITEMS: NavItem[] = [
   { slug: "reports", label: "Reports", description: "Daily stats and status counts", action: "view_reports" },
   { slug: "audit", label: "Audit", description: "Review the audit log", action: "view_audit" },
   { slug: "overrides", label: "Overrides", description: "Force orders and bypass steps", action: "override_status" },
+  // Last on purpose: it is the only destructive tab in the sidebar.
+  { slug: "reset", label: "Reset Data", description: "Erase all data except admin logins", action: "reset_data" },
 ];
 
 export function visibleNav(role: Role): NavItem[] {

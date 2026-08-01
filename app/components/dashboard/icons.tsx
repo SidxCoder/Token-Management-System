@@ -258,6 +258,16 @@ export const FilePlusIcon = make(
 );
 
 // slug -> nav icon, used by the sidebar
+// Destructive actions — triangle-and-bang rather than another rounded glyph, so
+// the Reset tab does not read like the rest of the sidebar.
+export const WarningIcon = make(
+  <>
+    <path d="M12 4.2 2.9 19.2h18.2L12 4.2Z" />
+    <path d="M12 10v4" />
+    <path d="M12 16.8h.01" />
+  </>,
+);
+
 export const NAV_ICONS: Record<string, Icon> = {
   orders: OrdersIcon,
   "new-order": FilePlusIcon,
@@ -271,4 +281,5 @@ export const NAV_ICONS: Record<string, Icon> = {
   reports: ReportsIcon,
   audit: AuditIcon,
   overrides: OverridesIcon,
+  reset: WarningIcon,
 };
