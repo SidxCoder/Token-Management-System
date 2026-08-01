@@ -113,6 +113,8 @@ export default function DeliveryDesk({
   // back to the list mid-task. It only ever changes on an explicit tap or when a
   // fresh copy of the SAME order arrives, so it can never retarget.
   const order = snapshot;
+  // Kept on screen after it leaves the queue, but no longer actionable.
+  const moved = order != null && !orders.some((o) => o.order_id === order.order_id);
   const tokenOk =
     !order ||
     tokenInput.trim() === "" ||
@@ -125,7 +127,7 @@ export default function DeliveryDesk({
     setBusy(true);
     setActionError(null);
     try {
-      await orderAction(order.order_id, "return_order", { reason: returnReason.trim() });
+      setSnapshot(await orderAction(order.order_id, "return_order", { reason: returnReason.trim() }));
       setReturnReason("");
       setConfirmReturn(false);
       setTokenInput("");
@@ -146,7 +148,7 @@ export default function DeliveryDesk({
     setBusy(true);
     setActionError(null);
     try {
-      await orderAction(order.order_id, "deliver");
+      setSnapshot(await orderAction(order.order_id, "deliver"));
       setTokenInput("");
       await load();
     } catch (e) {
@@ -291,7 +293,7 @@ export default function DeliveryDesk({
 
               <button
                 onClick={markDelivered}
-                disabled={busy || !tokenOk || tokenInput.trim() === ""}
+                disabled={moved || busy || !tokenOk || tokenInput.trim() === ""}
                 className="mt-6 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >
                 {busy ? "Updating…" : "Mark delivered"}
@@ -315,7 +317,7 @@ export default function DeliveryDesk({
                   <div className="mt-3 flex gap-3">
                     <button
                       onClick={returnOrder}
-                      disabled={busy}
+                      disabled={moved || busy}
                       className="flex-1 rounded-lg bg-amber-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:opacity-60"
                     >
                       {busy ? "Returning…" : "Confirm return"}
@@ -332,7 +334,7 @@ export default function DeliveryDesk({
               ) : (
                 <button
                   onClick={() => setConfirmReturn(true)}
-                  disabled={busy}
+                  disabled={moved || busy}
                   className="mt-3 w-full rounded-xl border border-amber-500 px-4 py-3 text-sm font-semibold text-amber-700 transition hover:bg-amber-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
                 >
                   Not collected — return to packing

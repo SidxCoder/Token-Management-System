@@ -137,6 +137,8 @@ export default function PackingQueue({
   // back to the list mid-task. It only ever changes on an explicit tap or when a
   // fresh copy of the SAME order arrives, so it can never retarget.
   const order = snapshot;
+  // Kept on screen after it leaves the packing queue, but no longer actionable.
+  const moved = order != null && !orders.some((o) => o.order_id === order.order_id);
 
   const hasMore = orders.length < total;
   const sentinel = useInfiniteScroll(
@@ -178,7 +180,16 @@ export default function PackingQueue({
     setBusy(true);
     setActionError(null);
     try {
-      await orderAction(order.order_id, "set_bag_number", { lineId, bagNumber });
+      // Show the server's copy straight away. The list refetch below may not
+      // contain this order any more (a newly PACKAGED order can fall past the
+      // loaded window under the "packaging pending first" sort), and then the
+      // pane would keep showing the row without its new bag number.
+      setSnapshot(await orderAction(order.order_id, "set_bag_number", { lineId, bagNumber }));
+      setBagDrafts((current) => {
+        const next = { ...current };
+        delete next[lineId];
+        return next;
+      });
       await load();
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Failed to set bag number");
@@ -198,7 +209,7 @@ export default function PackingQueue({
     try {
       // Releases the bagged lines to that runner. Unbagged lines stay here, so
       // the same order can be handed over again once they are bagged.
-      await orderAction(order.order_id, "assign_runner", { runnerId });
+      setSnapshot(await orderAction(order.order_id, "assign_runner", { runnerId }));
       await load();
     } catch (e) {
       setActionError(e instanceof Error ? e.message : "Failed to hand over");
@@ -214,7 +225,8 @@ export default function PackingQueue({
   const pendingLines = order
     ? order.Order_Lines.filter((l) => !l.handed_over && l.bag_number == null)
     : [];
-  const canHandOver = order?.status === "TOKEN_ISSUED" && readyLines.length > 0;
+  const canHandOver =
+    !moved && order?.status === "TOKEN_ISSUED" && readyLines.length > 0;
 
   return (
     <div className="space-y-6 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
@@ -395,7 +407,7 @@ export default function PackingQueue({
                           />
                           <button
                             type="button"
-                            disabled={busy}
+                            disabled={moved || busy}
                             onClick={() => assignBag(line.id)}
                             className="rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
                           >

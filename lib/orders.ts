@@ -7,6 +7,11 @@ export class WorkflowError extends Error {
 }
 export type Tx = Prisma.TransactionClient;
 
+// Without an explicit order Postgres returns rows in physical order, so editing
+// a line moves it to the end of the list — the items visibly reshuffle every
+// time a bag number is assigned. Any deterministic order fixes that.
+export const LINE_ORDER = [{ product_name: "asc" }, { id: "asc" }] as const;
+
 export type Actor = {
     id: string;
     username: string;
@@ -15,7 +20,7 @@ export type Actor = {
 async function loadOrder(tx:Tx, orderId: string) {
     const order = await tx.orders.findUnique({
         where: { order_id: orderId },
-        include: { Order_Lines: true, Token: true }
+        include: { Order_Lines: { orderBy: [...LINE_ORDER] }, Token: true }
     })
 
     if (!order) throw new WorkflowError(404, `order "${orderId}" not found`);
@@ -111,7 +116,7 @@ export async function createOrder(user: Actor, input: NewOrderInput) {
                 number_of_items: lines.length,
                 Order_Lines: { create: lines },
             },
-            include: { Order_Lines: true },
+            include: { Order_Lines: { orderBy: [...LINE_ORDER] } },
         });
         await logAction(tx, user, "create_order", created.id, { items: lines.length, source: "manual" });
         return created;
@@ -140,7 +145,7 @@ export async function issueToken(user: Actor, orderId: string){
         const updated = await tx.orders.update({
             where: {id: order.id},
             data: { token_number: token.id, token_date: new Date(), status: "TOKEN_ISSUED"},
-            include: { Order_Lines: true, Token: {where: {status: "ACTIVE"}}}
+            include: { Order_Lines: { orderBy: [...LINE_ORDER] }, Token: {where: {status: "ACTIVE"}}}
         });
 
         await logAction(tx, user, "issue_token", order.id, {
@@ -219,7 +224,7 @@ export async function setBagNumber(user: Actor, orderId: string, payload: {lineI
         const updated = await tx.orders.update({
             where: { id: order.id},
             data: { status },
-            include: { Order_Lines: true, Token: {where: { status: "ACTIVE" }}}
+            include: { Order_Lines: { orderBy: [...LINE_ORDER] }, Token: {where: { status: "ACTIVE" }}}
         })
 
         await logAction(tx, user, "set_bag_number", order.id, {
@@ -283,7 +288,7 @@ export async function assignRunner(user:Actor, orderId: string, payload: { runne
         const updated = await tx.orders.update({
             where: { id: order.id},
             data: { runner_id },
-            include: {Order_Lines: true, Token: { where: { status: "ACTIVE" } } }
+            include: {Order_Lines: { orderBy: [...LINE_ORDER] }, Token: { where: { status: "ACTIVE" } } }
         });
         const remaining = order.Order_Lines.length - order.Order_Lines.filter((l) => l.handed_over).length - ready.length;
         await logAction(tx, user, "assign_runner", order.id, {
@@ -317,7 +322,7 @@ export async function handToRunner(user:Actor, orderId: string, payload: { runne
         const updated = await tx.orders.update({
             where: { id: order.id},
             data: {status: "HANDOVER", runner_id},
-            include: {Order_Lines: true, Token: { where: { status: "ACTIVE" } } }
+            include: {Order_Lines: { orderBy: [...LINE_ORDER] }, Token: { where: { status: "ACTIVE" } } }
         });
         await logAction(tx, user, "hand_to_runner", order.id, { runner_id, items: collected });
         return updated;
@@ -346,7 +351,7 @@ export async function handToCashier(user:Actor, orderId: string, payload: { cash
             where: { id: order.id},
             // ready_at starts the customer-facing waiting timer.
             data: {status: "READY_FOR_PICKUP", cashier_id, ready_at: new Date()},
-            include: {Order_Lines: true, Token: { where: { status: "ACTIVE" } } }
+            include: {Order_Lines: { orderBy: [...LINE_ORDER] }, Token: { where: { status: "ACTIVE" } } }
         });
         await logAction(tx, user, "hand_to_cashier", order.id, { cashier_id });
         return updated;
@@ -369,7 +374,7 @@ export async function deliver(user:Actor, orderId: string){
         const updated = await tx.orders.update({
             where: { id: order.id},
             data: {status: "DELIVERED"},
-            include: {Order_Lines: true, Token: { where: { status: "ACTIVE" } } }
+            include: {Order_Lines: { orderBy: [...LINE_ORDER] }, Token: { where: { status: "ACTIVE" } } }
         });
         await logAction(tx, user, "deliver", order.id, {});
         return updated;
@@ -418,7 +423,7 @@ export async function returnToPackager(user:Actor, orderId: string, payload: { r
                 runner_id: null,
                 cashier_id: null,
             },
-            include: { Order_Lines: true, Token: { where: { status: "ACTIVE" } } },
+            include: { Order_Lines: { orderBy: [...LINE_ORDER] }, Token: { where: { status: "ACTIVE" } } },
         });
         await logAction(tx, user, "return_order", order.id, {
             from: order.status, to: status, token: active?.id ?? null, reason: reason || null,
@@ -447,7 +452,7 @@ export async function cancelOrder(user:Actor, orderId: string){
           const updated = await tx.orders.update({
               where: { id: order.id },
               data: { token_number: null, token_date: null, status },
-              include: { Order_Lines: true, Token: { where: { status: "ACTIVE" } } },
+              include: { Order_Lines: { orderBy: [...LINE_ORDER] }, Token: { where: { status: "ACTIVE" } } },
           });
           await logAction(tx, user, "cancel_token", order.id, { token: active.id });
           return updated;
@@ -472,7 +477,7 @@ export async function OverrideStatus(user:Actor, orderId: string, payload: { sta
                       ? { ready_at: new Date() }
                       : {}),
               },
-              include: { Order_Lines: true, Token: { where: { status: "ACTIVE" } } },
+              include: { Order_Lines: { orderBy: [...LINE_ORDER] }, Token: { where: { status: "ACTIVE" } } },
           });
           await logAction(tx, user, "override_status", order.id, { from: order.status, to:
   target });

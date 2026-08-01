@@ -10,7 +10,10 @@ Last updated: 2026-08-01
 | 2 | Customer display shows which cashier to collect from | ✅ | `/api/display` returns `counter`; display shows it in large green type. Verified: after handover, counter = "Counter 91". |
 | 3 | Order handed to Runner 1 also showed on Runner 2 | ✅ | Removed the `runner_id: null` clause from the `mine` filter in `lib/orderQuery.ts`. Verified: visible to R91=1, R92=0. |
 | 4 | "Collect bag" errored with "pick which runner…" | ✅ | `handToRunner` now falls back to the order's existing `runner_id`. Verified: admin collect succeeded and kept the R91 assignment. |
-| 5 | Assign bag → handover → bounced back to the list | 🟡 | Root cause not reproduced; mitigated. Selection is now sticky and a `snapshot` keeps the worked-on order on screen even after it leaves the queue. **Needs your retest.** |
+| 5 | Assign bag → handover → bounced back to the list | ✅ | Cause found via item 11: the pane's copy only refreshed if the order was still in the refetched window. Actions now take the updated order from their own response. |
+| 10 | Repeat handover errored "cannot hand to cashier while order is READY_FOR_PICKUP" | ✅ | Caused by my own item-5 mitigation — the kept-on-screen copy never updated its status, so the button stayed live. Actions now refresh it, and a `moved` guard disables every action once the order leaves the queue. |
+| 11 | Bag number not visible after assigning (until refresh) | ✅ | Same cause. `set_bag_number` now updates the pane from the response and clears the typed draft. |
+| 12 | Order lines reshuffled after every edit | ✅ | `Order_Lines` had no `orderBy`, so Postgres returned the edited row last. Added `LINE_ORDER` everywhere lines are fetched. Verified identical order across three consecutive actions. |
 | 6 | Return option in cashier dashboard | ✅ | New `return_order` action + `return_order` permission (CASHIER, ADMIN) + confirm UI with optional reason. Verified: status → PACKAGING_PENDING, token CANCELLED, routing cleared, lines reset. |
 | 7 | Account creation by role, auto station number | ✅ | Role picker only; server assigns the lowest free number per role and derives display name + username. `?next=1` previews it in the form. |
 
