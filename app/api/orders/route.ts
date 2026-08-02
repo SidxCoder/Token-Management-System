@@ -1,17 +1,9 @@
 import { getSessionUser } from "@/lib/auth"
-import { LineStage, Status } from "@/lib/generated/prisma/enums";
+import { Status } from "@/lib/generated/prisma/enums";
 import { can } from "@/lib/permissions";
 import { createOrder, WorkflowError } from "@/lib/orders";
 import { isValidSort, queryOrders } from "@/lib/orderQuery";
 import { NextRequest, NextResponse } from "next/server";
-
-// Only known stage names are honoured, so this cannot smuggle arbitrary
-// filters into Prisma.
-function parseStages(raw: string | null) {
-    if (!raw) return undefined;
-    const out = raw.split(",").map((s) => s.trim()).filter((s) => s in LineStage) as LineStage[];
-    return out.length ? out : undefined;
-}
 
 export async function GET(req: NextRequest) {
     const user = await getSessionUser();
@@ -51,8 +43,8 @@ export async function GET(req: NextRequest) {
         // Derived from the session role, never trusted from the client, so a
         // runner cannot ask for another runner's queue.
         mine: sp.get("mine") === "1",
-        // Comma-separated LineStage names, e.g. "RELEASED,WITH_RUNNER".
-        lines: parseStages(sp.get("lines")),
+        linesHandedOver:
+            sp.get("lines") === null ? undefined : sp.get("lines") === "1",
         role: user.role,
         userId: user.id,
     });
