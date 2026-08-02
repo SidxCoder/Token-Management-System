@@ -180,8 +180,12 @@ export async function setBagNumber(user: Actor, orderId: string, payload: {lineI
             // (TOKEN_ISSUED included: customer may arrive before packing is finished)
             if (!can(user.role, "set_bag_number")) throw new WorkflowError(403, "forbidden");
             if (bagNumber === null) throw new WorkflowError(400, "line has no bag number to clear");
-            if (!isAdmin && order.status !== "PACKAGING_PENDING" && order.status !== "PACKAGED" && order.status !== "TOKEN_ISSUED"){
-                throw new WorkflowError(409, `packing is closed (order is ${order.status})`)
+            // Whether packing is open is a property of the ITEM, not the order:
+            // after a partial delivery the order sits at PARTIALLY_DELIVERED
+            // while its remaining items are still in packing. Gating on order
+            // status stranded those items — unbaggable, so unshippable.
+            if (!isAdmin && line.handed_over) {
+                throw new WorkflowError(409, "this item has already gone to the runner")
             }
         } else {
             // HARD LOCK — once assigned, only admin may change or clear, any stage
@@ -263,8 +267,20 @@ export async function assignRunner(user:Actor, orderId: string, payload: { runne
 
     return prisma.$transaction(async (tx) => {
         const order = await loadOrder(tx, orderId);
-        if( order.status !== "TOKEN_ISSUED") {
-            throw new WorkflowError(409, `cannot assign a runner while order is ${order.status}`)
+
+        // A token must exist — the customer collects against one. Status is not
+        // checked directly: after a partial delivery the order is
+        // PARTIALLY_DELIVERED and its leftover items still need a route out.
+        if (order.token_number === null) {
+            throw new WorkflowError(409, "issue a token before handing anything over");
+        }
+
+        const inFlight = order.Order_Lines.filter((l) => l.handed_over && !l.delivered);
+        if (inFlight.length > 0) {
+            throw new WorkflowError(
+                409,
+                `${inFlight.length} item(s) from this order are still on their way to the counter — deliver those first`,
+            );
         }
 
         const ready = order.Order_Lines.filter((l) => l.bag_number !== null && !l.handed_over);
@@ -287,7 +303,9 @@ export async function assignRunner(user:Actor, orderId: string, payload: { runne
 
         const updated = await tx.orders.update({
             where: { id: order.id},
-            data: { runner_id },
+            // Re-enters the "released, waiting for a runner" stage; a second
+            // batch after a partial delivery starts the same journey.
+            data: { runner_id, status: "TOKEN_ISSUED" },
             include: {Order_Lines: { orderBy: [...LINE_ORDER] }, Token: { where: { status: "ACTIVE" } } }
         });
         const remaining = order.Order_Lines.length - order.Order_Lines.filter((l) => l.handed_over).length - ready.length;
@@ -367,16 +385,40 @@ export async function deliver(user:Actor, orderId: string){
             throw new WorkflowError(409, `cannot deliver while order is ${order.status}`)
         }
 
-        const unbagged = order.Order_Lines.filter((l)=> l.bag_number == null).length;
-        if(unbagged > 0) {
-            throw new WorkflowError(409, `${unbagged} of ${order.Order_Lines.length} items have no bag number`)
+        // Hand over what actually reached this counter. Requiring every item to
+        // be bagged made a partially handed-over order impossible to complete:
+        // the items in front of the customer could not be given to them because
+        // of an item still back in packing.
+        const atCounter = order.Order_Lines.filter((l) => l.handed_over && !l.delivered);
+        if (atCounter.length === 0) {
+            throw new WorkflowError(409, "there is nothing at the counter for this order");
         }
+
+        await tx.order_Lines.updateMany({
+            where: { id: { in: atCounter.map((l) => l.id) } },
+            data: { delivered: true },
+        });
+
+        const outstanding = order.Order_Lines.filter(
+            (l) => !l.delivered && !atCounter.some((b) => b.id === l.id),
+        );
+
+        // Anything left keeps the same token, so the customer holds one token
+        // for the whole order however many trips it takes.
+        const finalStatus = outstanding.length === 0 ? "DELIVERED" : "PARTIALLY_DELIVERED";
+
         const updated = await tx.orders.update({
             where: { id: order.id},
-            data: {status: "DELIVERED"},
+            data: outstanding.length === 0
+                ? { status: finalStatus }
+                // Clear the routing so it leaves the runner/cashier queues and
+                // returns to packing for the remainder.
+                : { status: finalStatus, runner_id: null, cashier_id: null, ready_at: null },
             include: {Order_Lines: { orderBy: [...LINE_ORDER] }, Token: { where: { status: "ACTIVE" } } }
         });
-        await logAction(tx, user, "deliver", order.id, {});
+        await logAction(tx, user, "deliver", order.id, {
+            items: atCounter.length, outstanding: outstanding.length, to: finalStatus,
+        });
         return updated;
     })
 }

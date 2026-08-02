@@ -6,6 +6,7 @@ export type OrderStatus =
   | "TOKEN_ISSUED"
   | "HANDOVER"
   | "READY_FOR_PICKUP"
+  | "PARTIALLY_DELIVERED"
   | "DELIVERED";
 
 export type OrderLine = {
@@ -14,6 +15,9 @@ export type OrderLine = {
   bag_number: number | null;
   packed?: boolean;
   sku_code?: string;
+  // Per-item progress. An order can reach the counter in several trips, so the
+  // cashier delivers what has arrived and the rest stays outstanding.
+  delivered?: boolean;
   // Partial handover: true once this line has physically gone to the runner.
   handed_over?: boolean;
 };
@@ -79,6 +83,7 @@ export const ALL_STATUSES: OrderStatus[] = [
   "TOKEN_ISSUED",
   "HANDOVER",
   "READY_FOR_PICKUP",
+  "PARTIALLY_DELIVERED",
   "DELIVERED",
 ];
 

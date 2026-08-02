@@ -8,6 +8,9 @@ export const PACKING_STATUSES: OrderStatus[] = [
   "PACKAGING_PENDING",
   "PACKAGED",
   "TOKEN_ISSUED",
+  // A partly delivered order still owns items in packing, so the packager must
+  // keep seeing it — otherwise the remainder can never be bagged or shipped.
+  "PARTIALLY_DELIVERED",
 ];
 
 export const RUNNER_STATUSES: OrderStatus[] = ["TOKEN_ISSUED", "HANDOVER"];
