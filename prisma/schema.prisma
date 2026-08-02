@@ -85,6 +85,9 @@ enum Status {
   HANDOVER
   READY_FOR_PICKUP
   TOKEN_ISSUED
+  // Some items handed to the customer, some still outstanding. The order is
+  // back in packing for the remainder but must not read as untouched.
+  PARTIALLY_DELIVERED
   DELIVERED
 }
 
@@ -100,6 +103,11 @@ model Order_Lines {
   // own `status` tracks the furthest stage reached; which lines have physically
   // moved is recorded here.
   handed_over Boolean @default(false)
+  // Set when the customer actually receives this item. Delivery works per item
+  // because an order can reach the counter in more than one trip — the cashier
+  // hands over what has arrived and the order stays PARTIALLY_DELIVERED until
+  // the rest follows.
+  delivered Boolean @default(false)
   order_ref Orders @relation(fields: [order_ref_id], references: [id])
 }
 
