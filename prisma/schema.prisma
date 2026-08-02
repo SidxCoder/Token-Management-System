@@ -95,11 +95,16 @@ model Order_Lines {
   bag_number Int?
   sku_code String?
   sku_description String?
-  // Partial handover: a packager can send the bagged lines to the runner and
-  // keep the rest in packing, so an order can straddle two stages. The order's
-  // own `status` tracks the furthest stage reached; which lines have physically
-  // moved is recorded here.
-  handed_over Boolean @default(false)
+  // Where this specific item is. Items of one order move independently: a
+  // packager can send what is bagged while the rest is still being packed, so
+  // one order legitimately has items at several stages at once.
+  //
+  // Two booleans could not express that — they left no way to tell "with the
+  // runner" from "at the counter", which forced a one-batch-at-a-time rule that
+  // blocked the packer until the customer physically collected.
+  //
+  // Orders.status is derived from these (see recomputeStatus in lib/orders.ts).
+  stage LineStage @default(PACKING)
   order_ref Orders @relation(fields: [order_ref_id], references: [id])
 }
 
@@ -117,8 +122,17 @@ model Tokens {
 }
 
 enum TokenStatus {
-  ACTIVE 
+  ACTIVE
   CANCELLED
+}
+
+// The journey of a single item. Declared in pipeline order.
+enum LineStage {
+  PACKING      // still being packed; can be bagged
+  RELEASED     // bagged and assigned to a runner, awaiting collection
+  WITH_RUNNER  // the runner has physically taken it
+  AT_COUNTER   // delivered to the cashier counter
+  DELIVERED    // handed to the customer
 }
 
 model Audit_Log {

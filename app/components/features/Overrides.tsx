@@ -52,6 +52,8 @@ export default function Overrides({
   const [limit, setLimit] = useState(PAGE_STEP);
   const [total, setTotal] = useState(initialTotal);
   const autoSelected = useRef(initialOrders.length > 0);
+  // Which sort the rows on screen belong to; null until the first fetch lands.
+  const [appliedSort, setAppliedSort] = useState<SortKey | null>(null);
 
   const term = useDebounced(search);
 
@@ -79,6 +81,7 @@ export default function Overrides({
       const data = page.orders;
       setOrders(data);
       setTotal(page.total);
+      setAppliedSort(sort);
       clearLoadError();
       // Only auto-select on the very first load. If the selected order later
       // leaves the queue (handed over, delivered, filtered out, or pushed past
@@ -105,6 +108,9 @@ export default function Overrides({
     }, 0);
     return () => window.clearTimeout(id);
   }, [loadOrders]);
+
+  // A re-sort is in flight: the rows on screen are still the old ordering.
+  const resorting = appliedSort !== null && appliedSort !== sort;
 
   const filteredOrders = orders;
 
@@ -231,7 +237,7 @@ export default function Overrides({
         <div className="lg:flex lg:min-h-0 lg:flex-col">
           <div className="mb-3 flex shrink-0 items-center justify-between gap-3">
             <span className="text-sm font-medium text-slate-700">Search orders</span>
-            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} />
+            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} busy={resorting} />
           </div>
           <label className="mb-3 block shrink-0 text-sm font-medium text-slate-700">
             <span className="sr-only">Search orders</span>

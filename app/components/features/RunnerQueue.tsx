@@ -63,6 +63,9 @@ export default function RunnerQueue({
     initialOrders[0] ?? null,
   );
   const autoSelected = useRef(initialOrders.length > 0);
+  // Which sort the rows on screen actually belong to. Null until the first
+  // fetch lands, so the initial render is not reported as "re-sorting".
+  const [appliedSort, setAppliedSort] = useState<SortKey | null>(null);
   const [cashiers, setCashiers] = useState<Staff[]>([]);
   const [cashierId, setCashierId] = useState("");
 
@@ -86,11 +89,12 @@ export default function RunnerQueue({
         sort,
         limit,
         mine: true,
-        linesHandedOver: true,
+        lines: ["RELEASED", "WITH_RUNNER"],
       });
       const relevant = page.orders;
       setOrders(relevant);
       setTotal(page.total);
+      setAppliedSort(sort);
       setSnapshot((prev) =>
         prev ? (relevant.find((o) => o.order_id === prev.order_id) ?? prev) : prev,
       );
@@ -122,6 +126,9 @@ export default function RunnerQueue({
   // `snapshot` keeps the copy the user is working on so the screen never snaps
   // back to the list mid-task. It only ever changes on an explicit tap or when a
   // fresh copy of the SAME order arrives, so it can never retarget.
+  // A re-sort is in flight: the rows on screen are still the old ordering.
+  const resorting = appliedSort !== null && appliedSort !== sort;
+
   const order = snapshot;
   // The pane deliberately keeps showing an order after it leaves this queue, so
   // the screen does not snap back to the list mid-task. But it is then a record
@@ -204,7 +211,7 @@ export default function RunnerQueue({
                 Collect from packager, then hand to cashier.
               </p>
             </div>
-            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} />
+            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} busy={resorting} />
           </div>
           {!loaded ? (
             <Loader label="Loading tokens…" />
@@ -215,7 +222,7 @@ export default function RunnerQueue({
               subtitle="Once tokens are assigned, they will appear here."
             />
           ) : (
-            <div className="mt-4 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
+            <div className={`mt-4 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1 transition-opacity ${resorting ? "opacity-50" : ""}`}>
               {orders.map((item) => (
                 <button
                   key={item.order_id}
@@ -242,8 +249,8 @@ export default function RunnerQueue({
                     {item.order_id} · {item.customer_name}
                   </p>
                   <p className="mt-2 text-xs text-slate-400">
-                    {baggedCount(item)}/{item.Order_Lines.length} bagged{item.Order_Lines.some((l) => l.handed_over) &&
-                    !item.Order_Lines.every((l) => l.handed_over)
+                    {baggedCount(item)}/{item.Order_Lines.length} bagged{item.Order_Lines.some((l) => l.stage !== "PACKING") &&
+                    item.Order_Lines.some((l) => l.stage === "PACKING")
                       ? " · partially handed over"
                       : ""}
                   </p>
