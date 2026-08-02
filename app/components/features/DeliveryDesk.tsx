@@ -55,8 +55,6 @@ export default function DeliveryDesk({
     initialOrders[0] ?? null,
   );
   const autoSelected = useRef(initialOrders.length > 0);
-  // Which sort the rows on screen belong to; null until the first fetch lands.
-  const [appliedSort, setAppliedSort] = useState<SortKey | null>(null);
 
   // A new sort means a different result set, so the window resets here rather
   // than in an effect — that avoids a cascading render and a wasted fetch at
@@ -77,7 +75,6 @@ export default function DeliveryDesk({
       const data = page.orders;
       setOrders(data);
       setTotal(page.total);
-      setAppliedSort(sort);
       setSnapshot((prev) =>
         prev ? (data.find((o) => o.order_id === prev.order_id) ?? prev) : prev,
       );
@@ -103,9 +100,6 @@ export default function DeliveryDesk({
   }, [sort, limit, setLoadError, clearLoadError]);
 
   usePolling(load, 4000, initialOrders.length > 0);
-
-  // A re-sort is in flight: the rows on screen are still the old ordering.
-  const resorting = appliedSort !== null && appliedSort !== sort;
 
   const hasMore = orders.length < total;
   const sentinel = useInfiniteScroll(
@@ -189,7 +183,7 @@ export default function DeliveryDesk({
               <h2 className="text-base font-semibold text-slate-900">Incoming orders</h2>
               <p className="mt-1 text-sm text-slate-500">Orders handed over by the runner.</p>
             </div>
-            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} busy={resorting} />
+            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} />
           </div>
           {!loaded ? (
             <Loader label="Loading orders…" />
@@ -200,7 +194,7 @@ export default function DeliveryDesk({
               subtitle="Orders will appear here once the runner hands them over."
             />
           ) : (
-            <div className={`mt-4 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1 transition-opacity ${resorting ? "opacity-50" : ""}`}>
+            <div className="mt-4 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
               {orders.map((item) => (
                 <button
                   key={item.order_id}

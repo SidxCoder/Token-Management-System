@@ -1,5 +1,5 @@
 import { prisma } from "./db";
-import { LineStage, Prisma, Role, Status } from "./generated/prisma/client";
+import { Prisma, Role, Status } from "./generated/prisma/client";
 import { can } from "./permissions";
 
 export class WorkflowError extends Error {
@@ -11,36 +11,6 @@ export type Tx = Prisma.TransactionClient;
 // a line moves it to the end of the list — the items visibly reshuffle every
 // time a bag number is assigned. Any deterministic order fixes that.
 export const LINE_ORDER = [{ product_name: "asc" }, { id: "asc" }] as const;
-
-type StagedLine = { stage: LineStage; bag_number: number | null };
-
-// Orders.status is derived from where the items actually are — items move
-// independently, so the order's status is a summary, not a driver.
-//
-// READY_FOR_PICKUP is deliberately reached only when EVERY outstanding item has
-// arrived at the counter: that status is what puts the token on the customer
-// display, and calling someone forward for part of their order would have them
-// queue twice.
-export function recomputeStatus(lines: StagedLine[], hasToken: boolean): Status {
-    const live = lines.filter((l) => l.stage !== LineStage.DELIVERED);
-
-    if (live.length === 0) return Status.DELIVERED;
-    if (live.every((l) => l.stage === LineStage.AT_COUNTER)) return Status.READY_FOR_PICKUP;
-    if (live.some((l) => l.stage === LineStage.WITH_RUNNER)) return Status.HANDOVER;
-    if (live.some((l) => l.stage === LineStage.RELEASED)) return Status.TOKEN_ISSUED;
-    if (hasToken) return Status.TOKEN_ISSUED;
-
-    return live.every((l) => l.bag_number !== null) ? Status.PACKAGED : Status.PACKAGING_PENDING;
-}
-
-// Re-reads the order's lines and writes the derived status back.
-async function syncStatus(tx: Tx, orderId: string) {
-    const [lines, order] = await Promise.all([
-        tx.order_Lines.findMany({ where: { order_ref_id: orderId }, select: { stage: true, bag_number: true } }),
-        tx.orders.findUniqueOrThrow({ where: { id: orderId }, select: { token_number: true } }),
-    ]);
-    return recomputeStatus(lines, order.token_number !== null);
-}
 
 export type Actor = {
     id: string;
@@ -206,18 +176,12 @@ export async function setBagNumber(user: Actor, orderId: string, payload: {lineI
         const isAdmin = user.role === "ADMIN"
 
         if(line.bag_number === null) {
-            // ASSIGN — packager or admin.
-            //
-            // Whether packing is open is a property of the LINE, not of the
-            // order: after a partial handover the order moves on while its
-            // remaining lines are still sitting in packing. Gating on order
-            // status stranded those lines permanently — they could not be
-            // bagged, so they could never ship and the order could never be
-            // delivered.
+            // ASSIGN — packager or admin; non-admins only while packing is still open
+            // (TOKEN_ISSUED included: customer may arrive before packing is finished)
             if (!can(user.role, "set_bag_number")) throw new WorkflowError(403, "forbidden");
             if (bagNumber === null) throw new WorkflowError(400, "line has no bag number to clear");
-            if (!isAdmin && line.stage !== LineStage.PACKING) {
-                throw new WorkflowError(409, "this item has already gone to the runner")
+            if (!isAdmin && order.status !== "PACKAGING_PENDING" && order.status !== "PACKAGED" && order.status !== "TOKEN_ISSUED"){
+                throw new WorkflowError(409, `packing is closed (order is ${order.status})`)
             }
         } else {
             // HARD LOCK — once assigned, only admin may change or clear, any stage
@@ -247,9 +211,15 @@ export async function setBagNumber(user: Actor, orderId: string, payload: {lineI
             data: {bag_number: bagNumber}
         });
 
-        // Bagging can flip PACKAGING_PENDING <-> PACKAGED; the shared derivation
-        // handles every other case and never regresses a shipped order.
-        const status = await syncStatus(tx, order.id);
+        // Recompute status from lines — only while in the two packing stages,
+        // so a bag change never regresses TOKEN_ISSUED or later.
+        let status = order.status;
+        if(order.status === "PACKAGING_PENDING" || order.status === "PACKAGED") {
+            const lines = await tx.order_Lines.findMany({
+                where: {order_ref_id: order.id}
+            })
+            status = lines.every((l) => l.bag_number !== null) ? "PACKAGED" : "PACKAGING_PENDING";
+        }
 
         const updated = await tx.orders.update({
             where: { id: order.id},
@@ -293,24 +263,18 @@ export async function assignRunner(user:Actor, orderId: string, payload: { runne
 
     return prisma.$transaction(async (tx) => {
         const order = await loadOrder(tx, orderId);
-
-        // A token must exist — the customer is collecting against one. Order
-        // status is deliberately not checked: items move independently, so an
-        // order can be releasing a second item while a first is at the counter.
-        if (order.token_number === null) {
-            throw new WorkflowError(409, "issue a token before handing anything over");
+        if( order.status !== "TOKEN_ISSUED") {
+            throw new WorkflowError(409, `cannot assign a runner while order is ${order.status}`)
         }
 
-        const ready = order.Order_Lines.filter(
-            (l) => l.bag_number !== null && l.stage === LineStage.PACKING,
-        );
+        const ready = order.Order_Lines.filter((l) => l.bag_number !== null && !l.handed_over);
         if (ready.length === 0) {
-            const stillPacking = order.Order_Lines.filter((l) => l.stage === LineStage.PACKING).length;
+            const pending = order.Order_Lines.filter((l) => !l.handed_over).length;
             throw new WorkflowError(
                 409,
-                stillPacking === 0
+                pending === 0
                     ? "every item on this order has already been handed over"
-                    : `no bagged items to hand over (${stillPacking} still need a bag number)`,
+                    : `no bagged items to hand over (${pending} still need a bag number)`,
             );
         }
 
@@ -318,15 +282,15 @@ export async function assignRunner(user:Actor, orderId: string, payload: { runne
 
         await tx.order_Lines.updateMany({
             where: { id: { in: ready.map((l) => l.id) } },
-            data: { stage: LineStage.RELEASED },
+            data: { handed_over: true },
         });
 
         const updated = await tx.orders.update({
             where: { id: order.id},
-            data: { runner_id, status: await syncStatus(tx, order.id) },
+            data: { runner_id },
             include: {Order_Lines: { orderBy: [...LINE_ORDER] }, Token: { where: { status: "ACTIVE" } } }
         });
-        const remaining = order.Order_Lines.filter((l) => l.stage === LineStage.PACKING).length - ready.length;
+        const remaining = order.Order_Lines.length - order.Order_Lines.filter((l) => l.handed_over).length - ready.length;
         await logAction(tx, user, "assign_runner", order.id, {
             runner_id, items: ready.length, remaining,
         });
@@ -340,10 +304,13 @@ export async function handToRunner(user:Actor, orderId: string, payload: { runne
 
     return prisma.$transaction(async (tx) => {
         const order = await loadOrder(tx, orderId);
+        if( order.status !== "TOKEN_ISSUED") {
+            throw new WorkflowError(409, `cannot hand to runner while order is ${order.status}`)
+        }
 
-        const waiting = order.Order_Lines.filter((l) => l.stage === LineStage.RELEASED);
-        if (waiting.length === 0) {
-            throw new WorkflowError(409, "nothing is waiting to be collected for this order");
+        const collected = order.Order_Lines.filter((l) => l.handed_over).length;
+        if (collected === 0) {
+            throw new WorkflowError(409, "nothing has been released to a runner for this order yet");
         }
 
         // An admin collecting on someone's behalf keeps the existing assignment;
@@ -352,17 +319,12 @@ export async function handToRunner(user:Actor, orderId: string, payload: { runne
             payload.runnerId ?? order.runner_id ??
             (await resolveTarget(tx, user, Role.RUNNER, undefined));
 
-        await tx.order_Lines.updateMany({
-            where: { id: { in: waiting.map((l) => l.id) } },
-            data: { stage: LineStage.WITH_RUNNER },
-        });
-
         const updated = await tx.orders.update({
             where: { id: order.id},
-            data: { runner_id, status: await syncStatus(tx, order.id) },
+            data: {status: "HANDOVER", runner_id},
             include: {Order_Lines: { orderBy: [...LINE_ORDER] }, Token: { where: { status: "ACTIVE" } } }
         });
-        await logAction(tx, user, "hand_to_runner", order.id, { runner_id, items: waiting.length });
+        await logAction(tx, user, "hand_to_runner", order.id, { runner_id, items: collected });
         return updated;
     })
 }
@@ -372,37 +334,26 @@ export async function handToCashier(user:Actor, orderId: string, payload: { cash
 
     return prisma.$transaction(async (tx) => {
         const order = await loadOrder(tx, orderId);
+        if( order.status !== "HANDOVER") {
+            throw new WorkflowError(409, `cannot hand to cashier while order is ${order.status}`)
+        }
 
-        // Only what this runner is carrying moves — anything still in packing
-        // follows on a later trip.
-        const carrying = order.Order_Lines.filter((l) => l.stage === LineStage.WITH_RUNNER);
+        // Only what the runner is actually carrying needs to be bagged — lines
+        // left behind in packing follow on a later handover.
+        const carrying = order.Order_Lines.filter((l) => l.handed_over);
         if (carrying.length === 0) {
             throw new WorkflowError(409, "this order has no items with the runner");
         }
 
         const cashier_id = await resolveTarget(tx, user, Role.CASHIER, payload.cashierId);
 
-        await tx.order_Lines.updateMany({
-            where: { id: { in: carrying.map((l) => l.id) } },
-            data: { stage: LineStage.AT_COUNTER },
-        });
-
-        const status = await syncStatus(tx, order.id);
-
         const updated = await tx.orders.update({
             where: { id: order.id},
-            data: {
-                status,
-                cashier_id,
-                // The waiting timer starts when the customer is actually called,
-                // which is only once the whole order has reached the counter.
-                ...(status === Status.READY_FOR_PICKUP && order.ready_at === null
-                    ? { ready_at: new Date() }
-                    : {}),
-            },
+            // ready_at starts the customer-facing waiting timer.
+            data: {status: "READY_FOR_PICKUP", cashier_id, ready_at: new Date()},
             include: {Order_Lines: { orderBy: [...LINE_ORDER] }, Token: { where: { status: "ACTIVE" } } }
         });
-        await logAction(tx, user, "hand_to_cashier", order.id, { cashier_id, items: carrying.length });
+        await logAction(tx, user, "hand_to_cashier", order.id, { cashier_id });
         return updated;
     })
 }
@@ -416,33 +367,16 @@ export async function deliver(user:Actor, orderId: string){
             throw new WorkflowError(409, `cannot deliver while order is ${order.status}`)
         }
 
-        // READY_FOR_PICKUP is only reached once every outstanding item is at the
-        // counter, so delivering hands over the complete order in one go.
-        const batch = order.Order_Lines.filter((l) => l.stage === LineStage.AT_COUNTER);
-        if (batch.length === 0) {
-            throw new WorkflowError(409, "there is nothing at the counter for this order");
+        const unbagged = order.Order_Lines.filter((l)=> l.bag_number == null).length;
+        if(unbagged > 0) {
+            throw new WorkflowError(409, `${unbagged} of ${order.Order_Lines.length} items have no bag number`)
         }
-
-        await tx.order_Lines.updateMany({
-            where: { id: { in: batch.map((l) => l.id) } },
-            data: { stage: LineStage.DELIVERED },
-        });
-
-        const status = await syncStatus(tx, order.id);
-        const outstanding = order.Order_Lines.filter(
-            (l) => l.stage !== LineStage.DELIVERED && !batch.some((b) => b.id === l.id),
-        );
-
         const updated = await tx.orders.update({
             where: { id: order.id},
-            data: outstanding.length === 0
-                ? { status }
-                : { status, runner_id: null, cashier_id: null, ready_at: null },
+            data: {status: "DELIVERED"},
             include: {Order_Lines: { orderBy: [...LINE_ORDER] }, Token: { where: { status: "ACTIVE" } } }
         });
-        await logAction(tx, user, "deliver", order.id, {
-            items: batch.length, outstanding: outstanding.length, to: status,
-        });
+        await logAction(tx, user, "deliver", order.id, {});
         return updated;
     })
 }
@@ -471,15 +405,13 @@ export async function returnToPackager(user:Actor, orderId: string, payload: { r
             });
         }
 
-        // Everything that had not yet reached the customer goes back to packing.
-        // Already-delivered items stay delivered — a return is about the part
-        // that was never collected.
         await tx.order_Lines.updateMany({
-            where: { order_ref_id: order.id, stage: { not: LineStage.DELIVERED } },
-            data: { stage: LineStage.PACKING },
+            where: { order_ref_id: order.id },
+            data: { handed_over: false },
         });
 
-        const status = await syncStatus(tx, order.id);
+        const status = order.Order_Lines.every((l) => l.bag_number !== null)
+            ? "PACKAGED" : "PACKAGING_PENDING";
 
         const updated = await tx.orders.update({
             where: { id: order.id },

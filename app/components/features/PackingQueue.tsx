@@ -60,8 +60,6 @@ export default function PackingQueue({
     initialOrders[0] ?? null,
   );
   const autoSelected = useRef(initialOrders.length > 0);
-  // Which sort the rows on screen belong to; null until the first fetch lands.
-  const [appliedSort, setAppliedSort] = useState<SortKey | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(
     initialOrders[0]?.order_id ?? null,
   );
@@ -100,15 +98,13 @@ export default function PackingQueue({
     try {
       const page = await fetchOrders({
         q: search,
-        // Anything still un-shipped, whatever stage the order itself reached.
-        lines: ["PACKING"],
+        status: PACKING_STATUSES,
         sort,
         limit,
       });
       const data = page.orders;
       setOrders(data);
       setTotal(page.total);
-      setAppliedSort(sort);
       setSnapshot((prev) =>
         prev ? (data.find((o) => o.order_id === prev.order_id) ?? prev) : prev,
       );
@@ -134,9 +130,6 @@ export default function PackingQueue({
   }, [search, sort, limit, setLoadError, clearLoadError]);
 
   usePolling(load, 4000, initialOrders.length > 0);
-
-  // A re-sort is in flight: the rows on screen are still the old ordering.
-  const resorting = appliedSort !== null && appliedSort !== sort;
 
   // An action can move the selected order out of this queue (handed over,
   // delivered, returned) and a re-sort can push it past the loaded window.
@@ -227,31 +220,13 @@ export default function PackingQueue({
 
   // Partial handover: anything bagged and not yet released can go now.
   const readyLines = order
-    ? order.Order_Lines.filter((l) => l.bag_number != null && l.stage === "PACKING")
+    ? order.Order_Lines.filter((l) => l.bag_number != null && !l.handed_over)
     : [];
   const pendingLines = order
-    ? order.Order_Lines.filter((l) => l.stage === "PACKING" && l.bag_number == null)
+    ? order.Order_Lines.filter((l) => !l.handed_over && l.bag_number == null)
     : [];
-  // Items from an earlier batch still with the runner or at the counter. Only
-  // one batch travels at a time, so nothing new can be released until these
-  // are delivered.
-  const inFlightLines = order
-    ? order.Order_Lines.filter((l) => l.stage === "RELEASED" || l.stage === "WITH_RUNNER")
-    : [];
-  const outstandingLines = order
-    ? order.Order_Lines.filter((l) => l.stage !== "DELIVERED")
-    : [];
-
-  // Mirrors the server rule in assignRunner. Gating on TOKEN_ISSUED (as this
-  // did) meant that after a partial delivery — which returns the order to
-  // PACKAGED — the leftover items could never be released, so the runner never
-  // saw them.
   const canHandOver =
-    !moved &&
-    order != null &&
-    order.token_number != null &&
-    inFlightLines.length === 0 &&
-    readyLines.length > 0;
+    !moved && order?.status === "TOKEN_ISSUED" && readyLines.length > 0;
 
   return (
     <div className="space-y-6 lg:flex lg:min-h-0 lg:flex-1 lg:flex-col">
@@ -290,7 +265,7 @@ export default function PackingQueue({
                 Assign bag numbers, then hand over after token is issued.
               </p>
             </div>
-            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} busy={resorting} />
+            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} />
           </div>
 
           <div className="relative mt-4 shrink-0">
@@ -331,7 +306,7 @@ export default function PackingQueue({
               }
             />
           ) : (
-            <div className={`mt-4 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1 transition-opacity ${resorting ? "opacity-50" : ""}`}>
+            <div className="mt-4 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
               {orders.map((item) => (
                 <button
                   key={item.order_id}
@@ -354,8 +329,8 @@ export default function PackingQueue({
                   </div>
                   <p className="mt-1 text-sm text-slate-500">{item.customer_name}</p>
                   <p className="mt-2 text-xs text-slate-400">
-                    {baggedCount(item)}/{item.Order_Lines.length} bagged{item.Order_Lines.some((l) => l.stage !== "PACKING") &&
-                    item.Order_Lines.some((l) => l.stage === "PACKING")
+                    {baggedCount(item)}/{item.Order_Lines.length} bagged{item.Order_Lines.some((l) => l.handed_over) &&
+                    !item.Order_Lines.every((l) => l.handed_over)
                       ? " · partially handed over"
                       : ""}
                   </p>
@@ -413,18 +388,7 @@ export default function PackingQueue({
                       className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center"
                     >
                       <p className="flex-1 text-sm text-slate-700">{line.product_name}</p>
-                      {/* Stage first, bag number second: once a line has left
-                          packing the packager needs to know that, not just
-                          which bag it went in. */}
-                      {line.stage === "DELIVERED" ? (
-                        <span className="text-sm font-semibold text-slate-400">
-                          Delivered · Bag {line.bag_number}
-                        </span>
-                      ) : line.stage === "RELEASED" || line.stage === "WITH_RUNNER" ? (
-                        <span className="text-sm font-semibold text-blue-600">
-                          With runner · Bag {line.bag_number}
-                        </span>
-                      ) : line.bag_number != null ? (
+                      {line.bag_number != null ? (
                         <span className="text-sm font-semibold text-emerald-600">
                           Bag {line.bag_number}
                         </span>
@@ -478,21 +442,15 @@ export default function PackingQueue({
                 disabled={!canHandOver || busy || !runnerId}
                 className="mt-3 w-full rounded-xl bg-blue-600 px-4 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
               >
-                {/* Counted against what is still outstanding, not the whole
-                    order — items delivered on an earlier batch are done. */}
-                {readyLines.length > 0 && readyLines.length < outstandingLines.length
-                  ? `Hand over ${readyLines.length} of ${outstandingLines.length} remaining items`
+                {readyLines.length > 0 && readyLines.length < order.Order_Lines.length
+                  ? `Hand over ${readyLines.length} of ${order.Order_Lines.length} items`
                   : "Hand over to runner"}
               </button>
               {!canHandOver ? (
                 <p className="mt-3 text-center text-xs text-slate-400">
-                  {order.token_number == null
+                  {order.status !== "TOKEN_ISSUED"
                     ? "Needs a token issued first."
-                    : inFlightLines.length > 0
-                      ? `${inFlightLines.length} item${inFlightLines.length === 1 ? " is" : "s are"} still with the runner or at the counter — they must be delivered before the rest can follow.`
-                      : readyLines.length === 0
-                        ? "Bag at least one item to hand over."
-                        : "Cannot hand over right now."}
+                    : "Bag at least one item to hand over."}
                 </p>
               ) : pendingLines.length ? (
                 <p className="mt-3 text-center text-xs text-amber-600">

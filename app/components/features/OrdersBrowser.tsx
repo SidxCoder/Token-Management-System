@@ -51,8 +51,6 @@ export default function OrdersBrowser({
   const [total, setTotal] = useState(initialTotal);
   // Phone-only overlay; opens on tap, never from load()'s auto-select.
   const [detailOpen, setDetailOpen] = useState(false);
-  // Which sort the rows on screen belong to; null until the first fetch lands.
-  const [appliedSort, setAppliedSort] = useState<SortKey | null>(null);
 
   const search = useDebounced(query);
 
@@ -74,7 +72,6 @@ export default function OrdersBrowser({
       const page = await fetchOrders({ q: search, sort, limit });
       setOrders(page.orders);
       setTotal(page.total);
-      setAppliedSort(sort);
       clearLoadError();
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Failed to load orders");
@@ -84,9 +81,6 @@ export default function OrdersBrowser({
   }, [search, sort, limit, setLoadError, clearLoadError]);
 
   usePolling(load, 4000, initialOrders.length > 0);
-
-  // A re-sort is in flight: the rows on screen are still the old ordering.
-  const resorting = appliedSort !== null && appliedSort !== sort;
 
   const results = orders;
   const selected = orders.find((o) => o.order_id === selectedId) ?? null;
@@ -105,7 +99,7 @@ export default function OrdersBrowser({
         <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:flex lg:min-h-0 lg:flex-col">
           <div className="flex shrink-0 items-center justify-between gap-3">
             <h2 className="text-base font-semibold text-slate-900">Search orders</h2>
-            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} busy={resorting} />
+            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} />
           </div>
           <div className="relative mt-4 shrink-0">
             <span className="pointer-events-none absolute inset-y-0 left-0 grid w-11 place-items-center text-slate-400">
@@ -122,7 +116,7 @@ export default function OrdersBrowser({
           {loading ? (
             <Loader label="Loading orders…" />
           ) : results.length ? (
-            <div className={`mt-5 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1 transition-opacity ${resorting ? "opacity-50" : ""}`}>
+            <div className="mt-5 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
               {results.map((order) => (
                 <button
                   key={order.order_id}

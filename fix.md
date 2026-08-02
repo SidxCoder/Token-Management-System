@@ -6,8 +6,7 @@ Last updated: 2026-08-01
 
 | # | Item | Status | Evidence |
 |---|------|--------|----------|
-| 1 | Partial order can be handed over to runner | ✅ | See item 13 — the first attempt was a trap and has been completed properly. |
-| 13 | Partial handover stranded the leftover items | ✅ | The first cut released bagged lines but never let them come back: once the batch moved on, the order left the packing queue, `set_bag_number` refused ("packing is closed"), and `deliver` refused ("1 of 3 items have no bag number") — the order could never be completed. Now per-line `delivered`, packing filtered by line state instead of order status, `assign_runner` allows a second batch once the first is delivered, and `deliver` completes only the batch at the counter. Verified: full A,B → deliver → bag C → C → deliver → `DELIVERED` on one token. |
+| 1 | Partial order can be handed over to runner | ✅ | New `Order_Lines.handed_over`. `assign_runner` releases only bagged lines; unbagged stay in packing. Verified: 3-line order, 2 bagged → `handed=2/3`, order in both queues. |
 | 2 | Customer display shows which cashier to collect from | ✅ | `/api/display` returns `counter`; display shows it in large green type. Verified: after handover, counter = "Counter 91". |
 | 3 | Order handed to Runner 1 also showed on Runner 2 | ✅ | Removed the `runner_id: null` clause from the `mine` filter in `lib/orderQuery.ts`. Verified: visible to R91=1, R92=0. |
 | 4 | "Collect bag" errored with "pick which runner…" | ✅ | `handToRunner` now falls back to the order's existing `runner_id`. Verified: admin collect succeeded and kept the R91 assignment. |
