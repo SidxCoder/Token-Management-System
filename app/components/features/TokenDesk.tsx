@@ -63,6 +63,9 @@ export default function TokenDesk({
   const [issuedLimit, setIssuedLimit] = useState(PAGE_STEP);
   const [total, setTotal] = useState(initialTotal);
   const [issuedTotal, setIssuedTotal] = useState(initialIssuedTotal);
+  // Which sort each tab's rows belong to; null until that tab's first fetch.
+  const [appliedSort, setAppliedSort] = useState<SortKey | null>(null);
+  const [appliedIssuedSort, setAppliedIssuedSort] = useState<SortKey | null>(null);
   // Phone-only: the detail overlay opens on tap, never from the auto-select
   // that load() performs, or it would reopen itself after every poll.
   const [detailOpen, setDetailOpen] = useState(false);
@@ -100,6 +103,8 @@ export default function TokenDesk({
       clearLoadError();
       setIssued(withToken.orders);
       setIssuedTotal(withToken.total);
+      setAppliedSort(sort);
+      setAppliedIssuedSort(issuedSort);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : "Failed to load orders");
     } finally {
@@ -108,6 +113,11 @@ export default function TokenDesk({
   }, [search, sort, issuedSort, limit, issuedLimit, setLoadError, clearLoadError]);
 
   usePolling(load, 4000, initialOrders.length > 0);
+
+  // A re-sort is in flight: the rows on screen are still the old ordering.
+  const resorting = appliedSort !== null && appliedSort !== sort;
+  const issuedResorting =
+    appliedIssuedSort !== null && appliedIssuedSort !== issuedSort;
 
   const results = orders;
 
@@ -182,7 +192,7 @@ export default function TokenDesk({
           <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm lg:flex lg:min-h-0 lg:flex-col">
             <div className="flex shrink-0 items-center justify-between gap-3">
               <h2 className="text-base font-semibold text-slate-900">Search order</h2>
-              <SortSelect value={sort} options={SEARCH_SORTS} onChange={changeSort} />
+              <SortSelect value={sort} options={SEARCH_SORTS} onChange={changeSort} busy={resorting} />
             </div>
             <div className="relative mt-4 shrink-0">
               <span className="pointer-events-none absolute inset-y-0 left-0 grid w-11 place-items-center text-slate-400">
@@ -198,7 +208,7 @@ export default function TokenDesk({
             {!loaded ? (
               <Loader label="Loading orders…" />
             ) : results.length ? (
-              <div className="mt-5 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
+              <div className={`mt-5 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1 transition-opacity ${resorting ? "opacity-50" : ""}`}>
                 {results.map((order) => (
                   <button
                     key={order.order_id}
@@ -331,6 +341,7 @@ export default function TokenDesk({
               value={issuedSort}
               options={ISSUED_SORTS}
               onChange={changeIssuedSort}
+              busy={issuedResorting}
             />
           </div>
           {issued.length ? (

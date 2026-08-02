@@ -1,6 +1,6 @@
 import { prisma } from "./db";
 import { LINE_ORDER } from "./orders";
-import { Status } from "./generated/prisma/enums";
+import { LineStage, Status } from "./generated/prisma/enums";
 import type { Order } from "@/app/components/shared/api";
 
 // Shared by /api/orders and by the dashboard pages. Pages call this directly so
@@ -33,8 +33,8 @@ const LINE_SELECT = {
   product_name: true,
   bag_number: true,
   sku_code: true,
-  // Which lines have physically moved to the runner (partial handover).
-  handed_over: true,
+  // Per-item stage, so the UI can show where each item actually is.
+  stage: true,
 } as const;
 
 const SORTS = {
@@ -87,8 +87,8 @@ export type OrderQueryInput = {
   pageSize?: number;
   /** Scope to the signed-in station. Derived from the session, never the client. */
   mine?: boolean;
-  /** Match orders that have at least one line in this handover state. */
-  linesHandedOver?: boolean;
+  /** Match orders having at least one item at any of these stages. */
+  lines?: LineStage[];
   role?: string;
   userId?: string;
 };
@@ -122,9 +122,12 @@ export async function queryOrders(input: OrderQueryInput) {
     ...(statuses.length ? { status: { in: statuses } } : {}),
     ...(input.hasToken ? { token_number: { not: null } } : {}),
     // Partial handover splits an order across stages, so the queues filter on
-    // line state rather than on order status alone.
-    ...(input.linesHandedOver !== undefined
-      ? { Order_Lines: { some: { handed_over: input.linesHandedOver } } }
+    // line state rather than on order status alone. Packing asks for orders
+    // with anything still un-shipped; the runner queue asks for anything in
+    // flight. Without this an order that moved on would vanish from packing
+    // while still holding un-bagged items.
+    ...(input.lines?.length
+      ? { Order_Lines: { some: { stage: { in: input.lines } } } }
       : {}),
     ...mineFilter,
     ...(q

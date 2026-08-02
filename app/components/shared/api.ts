@@ -8,14 +8,22 @@ export type OrderStatus =
   | "READY_FOR_PICKUP"
   | "DELIVERED";
 
+// Mirrors enum LineStage in schema.prisma, in pipeline order.
+export type LineStage =
+  | "PACKING"
+  | "RELEASED"
+  | "WITH_RUNNER"
+  | "AT_COUNTER"
+  | "DELIVERED";
+
 export type OrderLine = {
   id: string;
   product_name: string;
   bag_number: number | null;
   packed?: boolean;
   sku_code?: string;
-  // Partial handover: true once this line has physically gone to the runner.
-  handed_over?: boolean;
+  // Where this item is right now. Items of one order move independently.
+  stage?: LineStage;
 };
 
 export type Order = {
@@ -148,8 +156,8 @@ export async function fetchOrders(params?: {
   // Scope the queue to the signed-in runner/cashier. The server derives the
   // filter from the session role, so this cannot be used to read someone else's.
   mine?: boolean;
-  /** Restrict to orders having at least one line in this handover state. */
-  linesHandedOver?: boolean;
+  /** Restrict to orders having at least one line in this state. */
+  lines?: LineStage[];
 }): Promise<OrderPage> {
   const sp = new URLSearchParams();
   if (params?.q) sp.set("q", params.q);
@@ -161,8 +169,7 @@ export async function fetchOrders(params?: {
   if (params?.sort) sp.set("sort", params.sort);
   if (params?.limit) sp.set("pageSize", String(params.limit));
   if (params?.mine) sp.set("mine", "1");
-  if (params?.linesHandedOver !== undefined)
-    sp.set("lines", params.linesHandedOver ? "1" : "0");
+  if (params?.lines?.length) sp.set("lines", params.lines.join(","));
   const qs = sp.toString();
   const res = await fetch(`/api/orders${qs ? `?${qs}` : ""}`);
   const data = await res.json().catch(() => ({}));

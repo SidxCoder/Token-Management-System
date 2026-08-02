@@ -56,6 +56,8 @@ export default function CancelToken({
     initialOrders[0] ?? null,
   );
   const autoSelected = useRef(initialOrders.length > 0);
+  // Which sort the rows on screen belong to; null until the first fetch lands.
+  const [appliedSort, setAppliedSort] = useState<SortKey | null>(null);
 
   const term = useDebounced(search);
 
@@ -84,6 +86,7 @@ export default function CancelToken({
       const data = page.orders;
       setOrders(data);
       setTotal(page.total);
+      setAppliedSort(sort);
       setSnapshot((prev) =>
         prev ? (data.find((o) => o.order_id === prev.order_id) ?? prev) : prev,
       );
@@ -109,6 +112,9 @@ export default function CancelToken({
   }, [term, sort, limit, setLoadError, clearLoadError]);
 
   usePolling(load, 4000, initialOrders.length > 0);
+
+  // A re-sort is in flight: the rows on screen are still the old ordering.
+  const resorting = appliedSort !== null && appliedSort !== sort;
 
   const filtered = orders;
   // An action can move the selected order out of this queue (handed over,
@@ -163,7 +169,7 @@ export default function CancelToken({
                 Orders with an issued token that has not been delivered.
               </p>
             </div>
-            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} />
+            <SortSelect value={sort} options={SORT_OPTIONS} onChange={changeSort} busy={resorting} />
           </div>
           <label className="mt-4 block shrink-0">
             <span className="sr-only">Search orders</span>
@@ -177,7 +183,7 @@ export default function CancelToken({
           {!loaded ? (
             <Loader label="Loading tokens…" />
           ) : (
-            <div className="mt-4 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1">
+            <div className={`mt-4 space-y-3 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-1 transition-opacity ${resorting ? "opacity-50" : ""}`}>
               {filtered.map((item) => (
                 <button
                   key={item.order_id}
