@@ -21,6 +21,7 @@ export const NAV_ITEMS: NavItem[] = [
   { slug: "runner", label: "Runner", description: "Collect bags and hand to cashier", action: "hand_to_cashier" },
   { slug: "delivery", label: "Delivery", description: "Verify tokens and deliver", action: "deliver" },
   { slug: "users", label: "Users", description: "Manage staff accounts", action: "manage_users" },
+  { slug: "erp", label: "ERP / Roster", description: "Staff roster, biometric attendance & shift rules", action: "view_erp" },
   { slug: "reports", label: "Reports", description: "Daily stats and status counts", action: "view_reports" },
   { slug: "audit", label: "Audit", description: "Review the audit log", action: "view_audit" },
   { slug: "overrides", label: "Overrides", description: "Force orders and bypass steps", action: "override_status" },
