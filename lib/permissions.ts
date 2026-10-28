@@ -22,6 +22,12 @@ export const PERMISSIONS = {
   view_reports: [Role.ADMIN],
   view_audit: [Role.ADMIN],
   view_erp: [Role.ADMIN],
+  // Separate keys so ERP duties can move to other roles later by editing this
+  // map alone. Approvers are told apart by user id (requested_by/decided_by).
+  erp_upload: [Role.ADMIN],
+  erp_request: [Role.ADMIN],
+  erp_approve: [Role.ADMIN],
+  erp_freeze: [Role.ADMIN],
   // Wipes every order, token, session and non-admin account. Admin only, and
   // the route additionally requires two typed confirmations.
   reset_data: [Role.ADMIN],

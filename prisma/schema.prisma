@@ -34,6 +34,9 @@ model User {
   runner_orders Orders[] @relation("RunnerOrders")
   cashier_orders Orders[] @relation("CashierOrders")
   Audit Audit_Log[]
+  requested_regularisations Regularisation[] @relation("RequestedRegularisations")
+  decided_regularisations Regularisation[] @relation("DecidedRegularisations")
+  frozen_cycles Attendance_Cycle[] @relation("FrozenCycles")
 
   @@unique([role, station_number])
 }
@@ -142,3 +145,196 @@ model Audit_Log {
   order_ref Orders? @relation(fields: [order_ref_id], references: [id])
 }
 
+// ---------------------------------------------------------------------------
+// ERP: store roster & biometric attendance (POL-11-01, SOP-11-02/03).
+//
+// Only facts are stored while a cycle is open (roster, raw punches, approved
+// exceptions); verdicts are computed by lib/erp/rules.ts on read, so approving
+// a regularisation re-scores every later day in the cycle automatically.
+// Verdicts are written to Attendance_Day only when the cycle is frozen.
+// Times are minutes from midnight; enum values mirror lib/erp/types.ts.
+// ---------------------------------------------------------------------------
+
+// Store staff. Separate from User: most employees never log in.
+model Employee {
+  id String @id @default(uuid())
+  emp_code String @unique
+  name String
+  gender Gender
+  // Roster "ADD Task" column: Footfall Analysis, Trainer, CRM, ...
+  task String?
+  active Boolean @default(true)
+  created_at DateTime @default(now())
+  roster Roster_Shift[]
+  punches Punch[]
+  regularisations Regularisation[]
+  attendance_days Attendance_Day[]
+  disciplinary Disciplinary_Record[]
+}
+
+enum Gender {
+  M
+  F
+}
+
+// One per 19th-to-18th attendance cycle. FROZEN = nothing in it may change.
+model Attendance_Cycle {
+  id String @id @default(uuid())
+  start_date DateTime @unique @db.Date
+  end_date DateTime @db.Date
+  status CycleStatus @default(OPEN)
+  frozen_by String?
+  frozen_by_user User? @relation("FrozenCycles", fields: [frozen_by], references: [id])
+  frozen_at DateTime?
+  days Attendance_Day[]
+  disciplinary Disciplinary_Record[]
+}
+
+enum CycleStatus {
+  OPEN
+  FROZEN
+}
+
+model Roster_Shift {
+  id String @id @default(uuid())
+  employee_id String
+  employee Employee @relation(fields: [employee_id], references: [id])
+  date DateTime @db.Date
+  kind ShiftKind
+  // Null unless kind is SHIFT.
+  start_min Int?
+  end_min Int?
+  // The 10:45 band that opens the store; any late arrival on it is major.
+  is_opening Boolean @default(false)
+
+  @@unique([employee_id, date])
+}
+
+enum ShiftKind {
+  SHIFT
+  WEEKLY_OFF
+  LEAVE
+  HOLIDAY
+}
+
+// Raw biometric record. Regularisations never overwrite it; the engine
+// applies them on top so the device's original reading survives for audit.
+model Punch {
+  id String @id @default(uuid())
+  employee_id String
+  employee Employee @relation(fields: [employee_id], references: [id])
+  date DateTime @db.Date
+  in_min Int?
+  out_min Int?
+  // Groups rows from one biometric sheet upload.
+  upload_batch_id String
+  uploaded_at DateTime @default(now())
+
+  @@unique([employee_id, date])
+}
+
+model Regularisation {
+  id String @id @default(uuid())
+  employee_id String
+  employee Employee @relation(fields: [employee_id], references: [id])
+  date DateTime @db.Date
+  type RegularisationType
+  // Corrected times; null for TIME_EXCEPTION, which only excuses lateness.
+  in_min Int?
+  out_min Int?
+  note String
+  status RegularisationStatus @default(PENDING)
+  // Employees don't log in, so an admin always enters the request. An admin
+  // may not decide a request they entered (checked in the API).
+  requested_by String
+  requester User @relation("RequestedRegularisations", fields: [requested_by], references: [id])
+  requested_at DateTime @default(now())
+  decided_by String?
+  decider User? @relation("DecidedRegularisations", fields: [decided_by], references: [id])
+  decided_at DateTime?
+
+  @@index([employee_id, date])
+}
+
+enum RegularisationType {
+  MISSED_PUNCH
+  DEVICE_FAILURE
+  OUTDOOR_DUTY
+  TIME_EXCEPTION
+}
+
+enum RegularisationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// Snapshot of the engine's verdict, written once when the cycle is frozen.
+model Attendance_Day {
+  id String @id @default(uuid())
+  cycle_id String
+  cycle Attendance_Cycle @relation(fields: [cycle_id], references: [id])
+  employee_id String
+  employee Employee @relation(fields: [employee_id], references: [id])
+  date DateTime @db.Date
+  outcome DayOutcome
+  deduction Deduction
+  severity LateSeverity?
+  occurrence_no Int?
+  // Times are copied in so the frozen record stands on its own for payroll.
+  start_min Int?
+  end_min Int?
+  in_min Int?
+  out_min Int?
+  missed_punch Boolean
+  late_minutes Int
+  early_minutes Int
+  span_minutes Int
+  reasons Json
+
+  @@unique([employee_id, date])
+}
+
+enum DayOutcome {
+  PRESENT
+  EXCUSED
+  LATE
+  HALF_DAY
+  FULL_DAY_LEAVE
+  MISSED_PUNCH_PENDING
+  ABSENT
+  WEEKLY_OFF
+  LEAVE
+  HOLIDAY
+}
+
+enum Deduction {
+  NONE
+  HALF_LEAVE
+  FULL_LEAVE
+  UNPAID
+}
+
+enum LateSeverity {
+  MINOR
+  MAJOR
+}
+
+// Cumulative disciplinary record. Unlike the late counter it never resets.
+model Disciplinary_Record {
+  id String @id @default(uuid())
+  employee_id String
+  employee Employee @relation(fields: [employee_id], references: [id])
+  cycle_id String
+  cycle Attendance_Cycle @relation(fields: [cycle_id], references: [id])
+  kind DisciplinaryKind
+  date DateTime @db.Date
+  created_at DateTime @default(now())
+}
+
+enum DisciplinaryKind {
+  WARNING_1
+  WARNING_2
+  SHOW_CAUSE
+  MISSED_PUNCH_CAUTION
+}
