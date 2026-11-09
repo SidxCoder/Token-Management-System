@@ -93,6 +93,16 @@ export const UsersIcon = make(
   </>,
 );
 
+export const ErpIcon = make(
+  <>
+    <rect x="3" y="4" width="18" height="17" rx="2.5" />
+    <path d="M3 9h18" />
+    <path d="M8 2v4M16 2v4" />
+    <circle cx="12" cy="14" r="2.5" />
+    <path d="M12 13v1.2l.8.8" />
+  </>,
+);
+
 export const ReportsIcon = make(
   <>
     <path d="M4 5v14h16" />
@@ -278,6 +288,7 @@ export const NAV_ICONS: Record<string, Icon> = {
   runner: RunnerIcon,
   delivery: DeliveryIcon,
   users: UsersIcon,
+  erp: ErpIcon,
   reports: ReportsIcon,
   audit: AuditIcon,
   overrides: OverridesIcon,
